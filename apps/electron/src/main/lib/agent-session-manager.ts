@@ -14,9 +14,8 @@ import {
   getAgentSessionsIndexPath,
   getAgentSessionsDir,
   getAgentSessionMessagesPath,
-  getAgentSessionWorkspacePath,
 } from './config-paths'
-import { getAgentWorkspace } from './agent-workspace-manager'
+import { resolveAgentCwdByWorkspaceId } from './agent-cwd-resolver'
 import type { AgentSessionMeta, AgentMessage } from '@proma/shared'
 
 /**
@@ -107,12 +106,9 @@ export function createAgentSession(
   // 确保消息目录存在
   getAgentSessionsDir()
 
-  // 若有工作区，创建 session 级别子文件夹
+  // 若有工作区，提前解析并创建会话工作目录（按 cwdMode 决策）
   if (workspaceId) {
-    const ws = getAgentWorkspace(workspaceId)
-    if (ws) {
-      getAgentSessionWorkspacePath(ws.slug, meta.id)
-    }
+    resolveAgentCwdByWorkspaceId(workspaceId, meta.id)
   }
 
   console.log(`[Agent 会话] 已创建会话: ${meta.title} (${meta.id})`)

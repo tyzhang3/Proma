@@ -1,0 +1,32 @@
+name: agent-workspace-rootpath
+
+on:
+  pull_request:
+    paths:
+      - 'apps/electron/**'
+      - 'packages/shared/**'
+      - '.github/workflows/agent-workspace-rootpath.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'apps/electron/**'
+      - 'packages/shared/**'
+      - '.github/workflows/agent-workspace-rootpath.yml'
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+
+  build-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run --filter='@proma/electron' build:main
+      - run: bun run --filter='@proma/electron' build:preload
