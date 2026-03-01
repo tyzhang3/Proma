@@ -33,6 +33,8 @@ import type {
   AgentSaveFilesInput,
   AgentSavedFile,
   AgentCopyFolderInput,
+  AgentSearchSessionFilesInput,
+  AgentFileSuggestion,
   GetTaskOutputInput,
   GetTaskOutputResult,
   StopTaskInput,
@@ -910,6 +912,104 @@ export function registerIpcHandlers(): void {
       })
 
       return entries
+    }
+  )
+
+  // 搜索 session 目录文件（递归）
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SEARCH_SESSION_FILES,
+    async (_, input: AgentSearchSessionFilesInput): Promise<AgentFileSuggestion[]> => {
+      const MAX_SCAN_FILES = 10000
+      const DEFAULT_LIMIT = 20
+      const MAX_LIMIT = 50
+
+      const workspaceId = input.workspaceId
+      if (!workspaceId) return []
+
+      const query = (input.query || '').trim().toLowerCase()
+      const limit = Math.min(Math.max(input.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT)
+
+      const rootPath = resolveAgentCwdByWorkspaceId(workspaceId, input.sessionId).cwd
+      const matches: Array<AgentFileSuggestion & { rank: number }> = []
+
+      try {
+        const { readdirSync } = await import('node:fs')
+        const { join, relative, resolve, sep } = await import('node:path')
+
+        const normalizedRoot = resolve(rootPath)
+        const stack: string[] = [normalizedRoot]
+        let scannedFiles = 0
+
+        while (stack.length > 0 && scannedFiles < MAX_SCAN_FILES) {
+          const currentDir = stack.pop()!
+          let items: Array<{ name: string; isDirectory: () => boolean }>
+
+          try {
+            items = readdirSync(currentDir, { withFileTypes: true })
+          } catch {
+            continue
+          }
+
+          for (const item of items) {
+            if (scannedFiles >= MAX_SCAN_FILES) break
+
+            if (item.isDirectory()) {
+              if (
+                item.name === '.git' ||
+                item.name === 'node_modules' ||
+                item.name.startsWith('.')
+              ) {
+                continue
+              }
+              stack.push(join(currentDir, item.name))
+              continue
+            }
+
+            if (item.name === '.DS_Store' || item.name.startsWith('.')) {
+              continue
+            }
+
+            scannedFiles++
+
+            const fullPath = resolve(currentDir, item.name)
+            if (!fullPath.startsWith(normalizedRoot)) continue
+
+            const relativePath = relative(normalizedRoot, fullPath).split(sep).join('/')
+            const nameLower = item.name.toLowerCase()
+            const relativeLower = relativePath.toLowerCase()
+
+            let rank = 3
+            if (query) {
+              if (nameLower.startsWith(query)) {
+                rank = 0
+              } else if (nameLower.includes(query)) {
+                rank = 1
+              } else if (relativeLower.includes(query)) {
+                rank = 2
+              } else {
+                continue
+              }
+            }
+
+            matches.push({
+              name: item.name,
+              path: fullPath,
+              relativePath,
+              rank,
+            })
+          }
+        }
+
+        matches.sort((a, b) => {
+          if (a.rank !== b.rank) return a.rank - b.rank
+          return a.relativePath.localeCompare(b.relativePath)
+        })
+
+        return matches.slice(0, limit).map(({ rank: _rank, ...item }) => item)
+      } catch (error) {
+        console.warn('[IPC] 搜索 session 文件失败:', error)
+        return []
+      }
     }
   )
 

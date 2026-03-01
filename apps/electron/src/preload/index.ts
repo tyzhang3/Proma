@@ -41,6 +41,8 @@ import type {
   AgentSaveFilesInput,
   AgentSavedFile,
   AgentCopyFolderInput,
+  AgentSearchSessionFilesInput,
+  AgentFileSuggestion,
   GetTaskOutputInput,
   GetTaskOutputResult,
   StopTaskInput,
@@ -362,6 +364,9 @@ export interface ElectronAPI {
 
   /** 列出目录内容 */
   listDirectory: (dirPath: string) => Promise<FileEntry[]>
+
+  /** 搜索 session 目录文件 */
+  searchSessionFiles: (input: AgentSearchSessionFilesInput) => Promise<AgentFileSuggestion[]>
 
   /** 删除文件/目录 */
   deleteFile: (filePath: string) => Promise<void>
@@ -817,6 +822,10 @@ const electronAPI: ElectronAPI = {
 
   listDirectory: (dirPath: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.LIST_DIRECTORY, dirPath)
+  },
+
+  searchSessionFiles: (input: AgentSearchSessionFilesInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SEARCH_SESSION_FILES, input)
   },
 
   deleteFile: (filePath: string) => {

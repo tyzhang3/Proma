@@ -16,7 +16,7 @@
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { toast } from 'sonner'
-import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, AlertCircle, X, FolderOpen, Copy, Check, Sparkles } from 'lucide-react'
+import { Bot, CornerDownLeft, Square, Settings, Paperclip, FolderPlus, AlertCircle, X, FolderOpen, Copy, Check, Sparkles, FileText } from 'lucide-react'
 import { AgentMessages } from './AgentMessages'
 import { AgentHeader } from './AgentHeader'
 import { ContextUsageBadge } from './ContextUsageBadge'
@@ -49,7 +49,14 @@ import {
   currentAgentSuggestionAtom,
 } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
-import type { AgentSendInput, AgentMessage, AgentPendingFile, AgentSavedFile, ModelOption } from '@proma/shared'
+import type {
+  AgentSendInput,
+  AgentMessage,
+  AgentPendingFile,
+  AgentSavedFile,
+  AgentFileSuggestion,
+  ModelOption,
+} from '@proma/shared'
 
 /** 将 File 对象转为 base64 字符串 */
 function fileToBase64(file: File): Promise<string> {
@@ -63,6 +70,18 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
+}
+
+function extractMentionQuery(content: string): string | null {
+  const match = content.match(/(^|\s)@([^\s@]*)$/)
+  if (!match) return null
+  return match[2] ?? ''
+}
+
+function removeTrailingMention(content: string): string {
+  const next = content.replace(/(^|\s)@([^\s@]*)$/, (_, prefix: string) => prefix)
+  if (!next) return ''
+  return /\s$/.test(next) ? next : `${next} `
 }
 
 export function AgentView(): React.ReactElement {
@@ -92,6 +111,13 @@ export function AgentView(): React.ReactElement {
   const [isUploadingFolder, setIsUploadingFolder] = React.useState(false)
   const [dragFolderWarning, setDragFolderWarning] = React.useState(false)
   const [errorCopied, setErrorCopied] = React.useState(false)
+  const [mentionQuery, setMentionQuery] = React.useState('')
+  const [mentionOpen, setMentionOpen] = React.useState(false)
+  const [mentionLoading, setMentionLoading] = React.useState(false)
+  const [mentionActiveIndex, setMentionActiveIndex] = React.useState(-1)
+  const [mentionSuggestions, setMentionSuggestions] = React.useState<AgentFileSuggestion[]>([])
+  const [mentionedFiles, setMentionedFiles] = React.useState<AgentFileSuggestion[]>([])
+  const mentionRequestIdRef = React.useRef(0)
 
   // pendingFiles ref（供 addFilesAsAttachments 读取最新列表，避免闭包旧值）
   const pendingFilesRef = React.useRef(pendingFiles)
@@ -144,6 +170,15 @@ export function AgentView(): React.ReactElement {
       .catch(console.error)
 
   }, [currentSessionId, setCurrentMessages])
+
+  React.useEffect(() => {
+    setMentionedFiles([])
+    setMentionOpen(false)
+    setMentionQuery('')
+    setMentionSuggestions([])
+    setMentionActiveIndex(-1)
+    setMentionLoading(false)
+  }, [currentSessionId])
 
   // 自动发送 pending prompt（从设置页"对话完成配置"触发）
   React.useEffect(() => {
@@ -398,12 +433,133 @@ export function AgentView(): React.ReactElement {
     return { channelId: agentChannelId, modelId: agentModelId }
   }, [agentChannelId, agentModelId])
 
+  React.useEffect(() => {
+    const query = extractMentionQuery(inputContent)
+    // 每次输入变化先推进请求版本号，确保旧请求结果不会覆盖新状态
+    const requestId = mentionRequestIdRef.current + 1
+    mentionRequestIdRef.current = requestId
+
+    if (query === null || !currentSessionId || !currentWorkspaceId) {
+      setMentionOpen(false)
+      setMentionQuery('')
+      setMentionLoading(false)
+      setMentionSuggestions([])
+      setMentionActiveIndex(-1)
+      return
+    }
+
+    setMentionOpen(true)
+    setMentionQuery(query)
+    setMentionLoading(true)
+
+    const timer = setTimeout(() => {
+      window.electronAPI.searchSessionFiles({
+        workspaceId: currentWorkspaceId,
+        sessionId: currentSessionId,
+        query,
+        limit: 20,
+      }).then((items) => {
+        if (mentionRequestIdRef.current !== requestId) return
+        setMentionSuggestions(items)
+        setMentionActiveIndex(items.length > 0 ? 0 : -1)
+      }).catch((error) => {
+        if (mentionRequestIdRef.current !== requestId) return
+        console.warn('[AgentView] 搜索文件联想失败:', error)
+        setMentionSuggestions([])
+        setMentionActiveIndex(-1)
+      }).finally(() => {
+        if (mentionRequestIdRef.current === requestId) {
+          setMentionLoading(false)
+        }
+      })
+    }, 150)
+
+    return () => clearTimeout(timer)
+  }, [inputContent, currentSessionId, currentWorkspaceId])
+
+  const handleSelectMention = React.useCallback((file: AgentFileSuggestion): void => {
+    setMentionedFiles((prev) => {
+      if (prev.some((item) => item.path === file.path)) {
+        return prev
+      }
+      return [...prev, file]
+    })
+    setInputContent(removeTrailingMention(inputContent))
+    setMentionOpen(false)
+    setMentionQuery('')
+    setMentionSuggestions([])
+    setMentionActiveIndex(-1)
+    setMentionLoading(false)
+  }, [inputContent, setInputContent])
+
+  const handleRemoveMentionedFile = React.useCallback((path: string): void => {
+    setMentionedFiles((prev) => prev.filter((item) => item.path !== path))
+  }, [])
+
+  const handleClearMentionedFiles = React.useCallback((): void => {
+    setMentionedFiles([])
+  }, [])
+
+  const handleMentionKeyDown = React.useCallback((event: KeyboardEvent): boolean => {
+    if (!mentionOpen) return false
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      setMentionOpen(false)
+      return true
+    }
+
+    if (event.key === 'ArrowDown') {
+      if (mentionSuggestions.length === 0) return true
+      event.preventDefault()
+      setMentionActiveIndex((prev) => {
+        if (prev < 0) return 0
+        return (prev + 1) % mentionSuggestions.length
+      })
+      return true
+    }
+
+    if (event.key === 'ArrowUp') {
+      if (mentionSuggestions.length === 0) return true
+      event.preventDefault()
+      setMentionActiveIndex((prev) => {
+        if (prev <= 0) return mentionSuggestions.length - 1
+        return prev - 1
+      })
+      return true
+    }
+
+    if (event.key === 'Enter') {
+      if (mentionSuggestions.length === 0) return false
+      event.preventDefault()
+      const index = mentionActiveIndex >= 0 ? mentionActiveIndex : 0
+      const file = mentionSuggestions[index]
+      if (file) {
+        handleSelectMention(file)
+      }
+      return true
+    }
+
+    return false
+  }, [mentionOpen, mentionSuggestions, mentionActiveIndex, handleSelectMention])
+
   /** 发送消息 */
   const handleSend = React.useCallback(async (): Promise<void> => {
     const text = inputContent.trim()
     // 如果输入为空但有建议，使用建议内容
     const effectiveText = text || suggestion || ''
-    if ((!effectiveText && pendingFiles.length === 0 && pendingFolderRefs.length === 0) || !currentSessionId || !agentChannelId) return
+    if (
+      (
+        !effectiveText &&
+        pendingFiles.length === 0 &&
+        pendingFolderRefs.length === 0 &&
+        mentionedFiles.length === 0
+      ) ||
+      !currentSessionId ||
+      !agentChannelId
+    ) {
+      return
+    }
 
     // 上一条消息仍在处理中，提示用户等待或停止
     if (streaming) {
@@ -429,8 +585,9 @@ export function AgentView(): React.ReactElement {
       return map
     })
 
+    const referencedFiles = new Map<string, string>()
+
     // 1. 如果有 pending 文件，先保存到 session 目录
-    let fileReferences = ''
     if (pendingFiles.length > 0) {
       const workspace = workspaces.find((w) => w.id === currentWorkspaceId)
       if (workspace) {
@@ -445,8 +602,9 @@ export function AgentView(): React.ReactElement {
             sessionId: currentSessionId,
             files: filesToSave,
           })
-          const refs = saved.map((f) => `- ${f.filename}: ${f.targetPath}`).join('\n')
-          fileReferences += `<attached_files>\n${refs}\n</attached_files>\n\n`
+          for (const file of saved) {
+            referencedFiles.set(file.targetPath, file.filename)
+          }
         } catch (error) {
           console.error('[AgentView] 保存附件到 session 失败:', error)
         }
@@ -462,12 +620,28 @@ export function AgentView(): React.ReactElement {
 
     // 1b. 如果有 pending 文件夹引用（已复制到 session 目录）
     if (pendingFolderRefs.length > 0) {
-      const refs = pendingFolderRefs.map((f) => `- ${f.filename}: ${f.targetPath}`).join('\n')
-      fileReferences += `<attached_files>\n${refs}\n</attached_files>\n\n`
+      for (const file of pendingFolderRefs) {
+        referencedFiles.set(file.targetPath, file.filename)
+      }
       setPendingFolderRefs([])
     }
 
+    // 1c. @ 文件引用
+    if (mentionedFiles.length > 0) {
+      for (const file of mentionedFiles) {
+        referencedFiles.set(file.path, file.relativePath)
+      }
+      setMentionedFiles([])
+    }
+
     // 2. 构建最终消息
+    const fileReferences = referencedFiles.size > 0
+      ? `<attached_files>\n${
+        Array.from(referencedFiles.entries())
+          .map(([path, name]) => `- ${name}: ${path}`)
+          .join('\n')
+      }\n</attached_files>\n\n`
+      : ''
     const finalMessage = fileReferences + effectiveText
 
     // 防御性快照：将当前流式 assistant 内容保存到消息列表
@@ -528,7 +702,7 @@ export function AgentView(): React.ReactElement {
         return map
       })
     })
-  }, [inputContent, pendingFiles, pendingFolderRefs, currentSessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, suggestion, store, setStreamingStates, setCurrentMessages, setPendingFiles, setAgentStreamErrors, setPromptSuggestions])
+  }, [inputContent, pendingFiles, pendingFolderRefs, mentionedFiles, currentSessionId, agentChannelId, agentModelId, currentWorkspaceId, workspaces, streaming, suggestion, store, setStreamingStates, setCurrentMessages, setPendingFiles, setAgentStreamErrors, setPromptSuggestions])
 
   /** 停止生成 */
   const handleStop = React.useCallback((): void => {
@@ -585,7 +759,12 @@ export function AgentView(): React.ReactElement {
     }
   }, [agentError])
 
-  const canSend = (inputContent.trim().length > 0 || pendingFiles.length > 0 || pendingFolderRefs.length > 0) && agentChannelId !== null && !streaming
+  const canSend = (
+    inputContent.trim().length > 0 ||
+    pendingFiles.length > 0 ||
+    pendingFolderRefs.length > 0 ||
+    mentionedFiles.length > 0
+  ) && agentChannelId !== null && !streaming
 
   // 无当前会话 → 引导文案
   if (!currentSessionId) {
@@ -693,6 +872,35 @@ export function AgentView(): React.ReactElement {
               </div>
             )}
 
+            {/* @ 文件引用预览区域 */}
+            {mentionedFiles.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 px-3 pb-1.5">
+                {mentionedFiles.map((file) => (
+                  <div
+                    key={file.path}
+                    className="inline-flex items-center gap-1 rounded-md border bg-muted/50 px-2 py-1 text-xs text-foreground/80"
+                  >
+                    <FileText className="size-3 shrink-0 text-muted-foreground" />
+                    <span className="max-w-[260px] truncate">{file.relativePath}</span>
+                    <button
+                      type="button"
+                      className="text-muted-foreground/70 transition-colors hover:text-foreground"
+                      onClick={() => handleRemoveMentionedFile(file.path)}
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  onClick={handleClearMentionedFiles}
+                >
+                  清空引用
+                </button>
+              </div>
+            )}
+
             {/* Agent 建议提示 */}
             {suggestion && !streaming && (
               <div className="px-3 pb-1.5">
@@ -724,6 +932,8 @@ export function AgentView(): React.ReactElement {
               onChange={setInputContent}
               onSubmit={handleSend}
               onPasteFiles={handlePasteFiles}
+              onSpecialKeyDown={handleMentionKeyDown}
+              onBlur={() => setMentionOpen(false)}
               placeholder={
                 agentChannelId
                   ? '输入消息... (Enter 发送，Shift+Enter 换行)'
@@ -732,6 +942,37 @@ export function AgentView(): React.ReactElement {
               disabled={!agentChannelId}
               autoFocusTrigger={currentSessionId}
             />
+
+            {/* @ 文件联想面板 */}
+            {mentionOpen && (
+              <div className="px-3 pb-1.5">
+                <div className="max-h-52 overflow-y-auto rounded-md border bg-popover">
+                  {mentionLoading ? (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">搜索文件中...</div>
+                  ) : mentionSuggestions.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">
+                      {mentionQuery ? '未找到匹配文件' : '输入关键词筛选文件'}
+                    </div>
+                  ) : (
+                    mentionSuggestions.map((item, index) => (
+                      <button
+                        key={item.path}
+                        type="button"
+                        className={cn(
+                          'flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors',
+                          index === mentionActiveIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60'
+                        )}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => handleSelectMention(item)}
+                      >
+                        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{item.relativePath}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Footer 工具栏 */}
             <div className="flex items-center justify-between px-2 py-[5px] h-[40px] gap-4">

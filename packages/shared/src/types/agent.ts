@@ -408,6 +408,28 @@ export interface FileEntry {
   children?: FileEntry[]
 }
 
+/** Agent 会话文件搜索输入 */
+export interface AgentSearchSessionFilesInput {
+  /** 工作区 ID */
+  workspaceId?: string
+  /** 会话 ID */
+  sessionId: string
+  /** 搜索关键词（可为空，表示返回默认候选） */
+  query: string
+  /** 返回数量限制（默认 20，最大 50） */
+  limit?: number
+}
+
+/** Agent 文件联想候选 */
+export interface AgentFileSuggestion {
+  /** 文件名 */
+  name: string
+  /** 绝对路径 */
+  path: string
+  /** 相对 session 目录路径 */
+  relativePath: string
+}
+
 // ===== Agent 附件 =====
 
 /** Agent 待发送文件（UI 侧暂存） */
@@ -604,6 +626,8 @@ export const AGENT_IPC_CHANNELS = {
   GET_SESSION_PATH: 'agent:get-session-path',
   /** 列出目录内容 */
   LIST_DIRECTORY: 'agent:list-directory',
+  /** 搜索 session 文件 */
+  SEARCH_SESSION_FILES: 'agent:search-session-files',
   /** 删除文件/空目录 */
   DELETE_FILE: 'agent:delete-file',
   /** 用系统默认应用打开文件 */

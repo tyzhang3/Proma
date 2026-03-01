@@ -158,6 +158,10 @@ interface RichTextInputProps {
   onSubmit: () => void
   /** 粘贴文件回调（拦截粘贴的文件） */
   onPasteFiles?: (files: File[]) => void
+  /** 特殊按键回调（返回 true 表示已消费事件） */
+  onSpecialKeyDown?: (event: KeyboardEvent) => boolean
+  /** 编辑器失焦回调 */
+  onBlur?: () => void
   /** 占位文字 */
   placeholder?: string
   /** 是否显示建议样式（斜体占位符） */
@@ -180,6 +184,8 @@ export function RichTextInput({
   onChange,
   onSubmit,
   onPasteFiles,
+  onSpecialKeyDown,
+  onBlur,
   placeholder = '有什么可以帮助到你的呢？',
   suggestionActive = false,
   className,
@@ -197,6 +203,12 @@ export function RichTextInput({
   // 保持 onPasteFiles 引用最新
   const onPasteFilesRef = useRef(onPasteFiles)
   onPasteFilesRef.current = onPasteFiles
+  // 保持 onSpecialKeyDown 引用最新
+  const onSpecialKeyDownRef = useRef(onSpecialKeyDown)
+  onSpecialKeyDownRef.current = onSpecialKeyDown
+  // 保持 onBlur 引用最新
+  const onBlurRef = useRef(onBlur)
+  onBlurRef.current = onBlur
 
   const editor = useEditor({
     extensions: [
@@ -248,6 +260,10 @@ export function RichTextInput({
           isComposingRef.current = false
           return false
         },
+        blur: () => {
+          onBlurRef.current?.()
+          return false
+        },
       },
       handlePaste: (view, event) => {
         // 拦截粘贴的文件（图片等）
@@ -260,6 +276,10 @@ export function RichTextInput({
         return false
       },
       handleKeyDown: (view, event) => {
+        if (onSpecialKeyDownRef.current?.(event)) {
+          return true
+        }
+
         // Enter 提交，Shift+Enter 换行
         if (event.key === 'Enter' && !event.shiftKey) {
           // 如果在代码块中，允许正常换行
