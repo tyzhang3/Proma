@@ -10,12 +10,15 @@
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { join, resolve } from 'node:path'
 import {
   getAgentSessionsIndexPath,
   getAgentSessionsDir,
   getAgentSessionMessagesPath,
+  getAgentSessionWorkspacePath,
 } from './config-paths'
 import { resolveAgentCwdByWorkspaceId } from './agent-cwd-resolver'
+import { getAgentWorkspace } from './agent-workspace-manager'
 import type { AgentSessionMeta, AgentMessage } from '@proma/shared'
 
 /**
@@ -207,7 +210,10 @@ export function deleteAgentSession(id: string): void {
     const ws = getAgentWorkspace(removed.workspaceId)
     if (ws) {
       try {
-        const sessionDir = getAgentSessionWorkspacePath(ws.slug, id)
+        const sessionDir = ws.rootPath
+          ? (ws.cwdMode === 'session-subdir' ? join(resolve(ws.rootPath), id) : null)
+          : getAgentSessionWorkspacePath(ws.slug, id)
+        if (!sessionDir) return
         if (existsSync(sessionDir)) {
           rmSync(sessionDir, { recursive: true, force: true })
           console.log(`[Agent 会话] 已清理 session 工作目录: ${sessionDir}`)
