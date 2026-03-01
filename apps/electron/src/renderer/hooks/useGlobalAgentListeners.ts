@@ -26,7 +26,7 @@ import {
   sendDesktopNotification,
 } from '@/atoms/notifications'
 import type { AgentStreamState } from '@/atoms/agent-atoms'
-import type { AgentStreamEvent, AgentStreamCompletePayload } from '@proma/shared'
+import type { AgentStreamEvent, AgentStreamCompletePayload, AgentStreamErrorPayload } from '@proma/shared'
 
 export function useGlobalAgentListeners(): void {
   const store = useStore()
@@ -211,7 +211,7 @@ export function useGlobalAgentListeners(): void {
 
     // ===== 3. 流式错误 =====
     const cleanupError = window.electronAPI.onAgentStreamError(
-      (data: { sessionId: string; error: string }) => {
+      (data: AgentStreamErrorPayload) => {
         console.error('[GlobalAgentListeners] 流式错误:', data.error)
 
         // 存储错误消息

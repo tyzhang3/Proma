@@ -35,12 +35,14 @@ import type {
   AgentSendInput,
   AgentStreamEvent,
   AgentStreamCompletePayload,
+  AgentStreamErrorPayload,
   AgentWorkspace,
   AgentUpdateWorkspaceInput,
   AgentGenerateTitleInput,
   AgentSaveFilesInput,
   AgentSavedFile,
   AgentCopyFolderInput,
+  AgentSnapshotSessionFilesInput,
   AgentSearchSessionFilesInput,
   AgentFileSuggestion,
   GetTaskOutputInput,
@@ -320,7 +322,7 @@ export interface ElectronAPI {
   onAgentStreamComplete: (callback: (data: AgentStreamCompletePayload) => void) => () => void
 
   /** 订阅 Agent 流式错误事件 */
-  onAgentStreamError: (callback: (data: { sessionId: string; error: string }) => void) => () => void
+  onAgentStreamError: (callback: (data: AgentStreamErrorPayload) => void) => () => void
 
   /** 订阅 Agent 标题自动更新事件 */
   onAgentTitleUpdated: (callback: (data: { sessionId: string; title: string }) => void) => () => void
@@ -360,6 +362,9 @@ export interface ElectronAPI {
 
   /** 复制文件夹到 Agent session 工作目录 */
   copyFolderToSession: (input: AgentCopyFolderInput) => Promise<AgentSavedFile[]>
+
+  /** 快照引用文件到 Agent session 队列目录 */
+  snapshotSessionFiles: (input: AgentSnapshotSessionFilesInput) => Promise<AgentSavedFile[]>
 
   // ===== Agent 文件系统操作 =====
 
@@ -754,8 +759,8 @@ const electronAPI: ElectronAPI = {
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.STREAM_COMPLETE, listener) }
   },
 
-  onAgentStreamError: (callback: (data: { sessionId: string; error: string }) => void) => {
-    const listener = (_: unknown, data: { sessionId: string; error: string }): void => callback(data)
+  onAgentStreamError: (callback: (data: AgentStreamErrorPayload) => void) => {
+    const listener = (_: unknown, data: AgentStreamErrorPayload): void => callback(data)
     ipcRenderer.on(AGENT_IPC_CHANNELS.STREAM_ERROR, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.STREAM_ERROR, listener) }
   },
@@ -821,6 +826,10 @@ const electronAPI: ElectronAPI = {
 
   copyFolderToSession: (input: AgentCopyFolderInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.COPY_FOLDER_TO_SESSION, input)
+  },
+
+  snapshotSessionFiles: (input: AgentSnapshotSessionFilesInput) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SNAPSHOT_SESSION_FILES, input)
   },
 
   // Agent 文件系统操作

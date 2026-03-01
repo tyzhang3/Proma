@@ -33,6 +33,7 @@ import type {
   AgentSaveFilesInput,
   AgentSavedFile,
   AgentCopyFolderInput,
+  AgentSnapshotSessionFilesInput,
   AgentSearchSessionFilesInput,
   AgentFileSuggestion,
   GetTaskOutputInput,
@@ -101,7 +102,7 @@ import {
   updateAgentSessionMeta,
   deleteAgentSession,
 } from './lib/agent-session-manager'
-import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, copyFolderToSession } from './lib/agent-service'
+import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, copyFolderToSession, snapshotSessionFiles } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { getAgentSessionWorkspacePath, getAgentWorkspacesDir } from './lib/config-paths'
@@ -875,6 +876,14 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.COPY_FOLDER_TO_SESSION,
     async (_, input: AgentCopyFolderInput): Promise<AgentSavedFile[]> => {
       return copyFolderToSession(input)
+    }
+  )
+
+  // 快照引用文件到 Agent session 队列目录
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SNAPSHOT_SESSION_FILES,
+    async (_, input: AgentSnapshotSessionFilesInput): Promise<AgentSavedFile[]> => {
+      return snapshotSessionFiles(input)
     }
   )
 

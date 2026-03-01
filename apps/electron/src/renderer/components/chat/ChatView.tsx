@@ -1,19 +1,10 @@
 /**
  * ChatView - 主聊天视图容器
- *
- * 职责：
- * - 加载当前对话消息和上下文分隔线
- * - 订阅流式 IPC 事件（chunk, reasoning, complete, error）
- * - 管理 streaming 状态和累积内容
- * - 处理消息删除、上下文清除/删除
- * - 传递 contextLength 和 contextDividers 到 sendMessage
- * - 无当前对话时显示引导文案
- *
- * 布局：三段式 ChatHeader | ChatMessages | ChatInput
  */
 
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { toast } from 'sonner'
 import { MessageSquare, AlertCircle, X } from 'lucide-react'
 import { ChatHeader } from './ChatHeader'
 import { ChatMessages } from './ChatMessages'
@@ -41,7 +32,6 @@ import { resolvedSystemMessageAtom, promptSidebarOpenAtom } from '@/atoms/system
 import { cn } from '@/lib/utils'
 import type { ConversationStreamState } from '@/atoms/chat-atoms'
 import type {
-  ChatSendInput,
   GenerateTitleInput,
   StreamChunkEvent,
   StreamReasoningEvent,
@@ -51,6 +41,14 @@ import type {
   FileAttachment,
   AttachmentSaveInput,
 } from '@proma/shared'
+
+interface SendOptions {
+  attachments?: FileAttachment[]
+  consumePendingAttachments?: boolean
+  cleanupAttachmentsOnError?: FileAttachment[]
+  messageCountBeforeSend?: number
+  contextDividersOverride?: string[]
+}
 
 export function ChatView(): React.ReactElement {
   const currentConversationId = useAtomValue(currentConversationIdAtom)
@@ -84,6 +82,51 @@ export function ChatView(): React.ReactElement {
     setInlineEditingMessageId(null)
   }, [currentConversationId])
 
+  const snapshotPendingAttachments = React.useCallback(async (conversationId: string): Promise<FileAttachment[]> => {
+    if (pendingAttachments.length === 0) return []
+
+    const currentAttachments = [...pendingAttachments]
+    const savedAttachments: FileAttachment[] = []
+
+    for (const att of currentAttachments) {
+      const base64Data = window.__pendingAttachmentData?.get(att.id)
+      if (!base64Data) continue
+
+      try {
+        const input: AttachmentSaveInput = {
+          conversationId,
+          filename: att.filename,
+          mediaType: att.mediaType,
+          data: base64Data,
+        }
+        const result = await window.electronAPI.saveAttachment(input)
+        savedAttachments.push(result.attachment)
+      } catch (error) {
+        console.error('[ChatView] 保存附件失败:', error)
+      }
+    }
+
+    for (const att of currentAttachments) {
+      if (att.previewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(att.previewUrl)
+      }
+      window.__pendingAttachmentData?.delete(att.id)
+    }
+    setPendingAttachments([])
+
+    return savedAttachments
+  }, [pendingAttachments, setPendingAttachments])
+
+  const cleanupAttachments = React.useCallback(async (attachments: FileAttachment[]): Promise<void> => {
+    for (const attachment of attachments) {
+      try {
+        await window.electronAPI.deleteAttachment(attachment.localPath)
+      } catch (error) {
+        console.warn('[ChatView] 清理附件失败:', error)
+      }
+    }
+  }, [])
+
   // 加载当前对话最近消息 + 上下文分隔线
   React.useEffect(() => {
     if (!currentConversationId) {
@@ -93,7 +136,6 @@ export function ChatView(): React.ReactElement {
       return
     }
 
-    // 仅加载最近 N 条消息，避免大量消息导致渲染卡顿
     window.electronAPI
       .getRecentMessages(currentConversationId, INITIAL_MESSAGE_LIMIT)
       .then((result) => {
@@ -102,31 +144,43 @@ export function ChatView(): React.ReactElement {
       })
       .catch(console.error)
 
-    // 从对话元数据加载分隔线
     if (currentConversation?.contextDividers) {
       setContextDividers(currentConversation.contextDividers)
     } else {
       setContextDividers([])
     }
 
-    // 从对话元数据恢复模型/渠道选择
     if (currentConversation?.modelId && currentConversation?.channelId) {
       setSelectedModel({
         channelId: currentConversation.channelId,
         modelId: currentConversation.modelId,
       })
     }
-  }, [currentConversationId, currentConversation?.contextDividers, currentConversation?.modelId, currentConversation?.channelId, setCurrentMessages, setContextDividers, setHasMoreMessages, setSelectedModel])
+  }, [
+    currentConversationId,
+    currentConversation?.contextDividers,
+    currentConversation?.modelId,
+    currentConversation?.channelId,
+    setCurrentMessages,
+    setContextDividers,
+    setHasMoreMessages,
+    setSelectedModel,
+  ])
 
   // 订阅流式 IPC 事件（全局，不按 conversationId 过滤）
   React.useEffect(() => {
-    /** 辅助函数：更新 Map 中某个对话的流式状态 */
     const updateState = (
       convId: string,
       updater: (prev: ConversationStreamState) => ConversationStreamState
     ): void => {
       setStreamingStates((prev) => {
-        const current = prev.get(convId) ?? { streaming: false, content: '', reasoning: '', model: undefined, toolActivities: [] }
+        const current = prev.get(convId) ?? {
+          streaming: false,
+          content: '',
+          reasoning: '',
+          model: undefined,
+          toolActivities: [],
+        }
         const next = updater(current)
         const map = new Map(prev)
         map.set(convId, next)
@@ -134,7 +188,6 @@ export function ChatView(): React.ReactElement {
       })
     }
 
-    /** 辅助函数：从 Map 中移除某个对话的流式状态 */
     const removeState = (convId: string): void => {
       setStreamingStates((prev) => {
         if (!prev.has(convId)) return prev
@@ -144,106 +197,82 @@ export function ChatView(): React.ReactElement {
       })
     }
 
-    const cleanupChunk = window.electronAPI.onStreamChunk(
-      (event: StreamChunkEvent) => {
-        updateState(event.conversationId, (s) => ({
-          ...s,
-          content: s.content + event.delta,
-        }))
-      }
-    )
+    const cleanupChunk = window.electronAPI.onStreamChunk((event: StreamChunkEvent) => {
+      updateState(event.conversationId, (s) => ({
+        ...s,
+        content: s.content + event.delta,
+      }))
+    })
 
-    const cleanupReasoning = window.electronAPI.onStreamReasoning(
-      (event: StreamReasoningEvent) => {
-        updateState(event.conversationId, (s) => ({
-          ...s,
-          reasoning: s.reasoning + event.delta,
-        }))
-      }
-    )
+    const cleanupReasoning = window.electronAPI.onStreamReasoning((event: StreamReasoningEvent) => {
+      updateState(event.conversationId, (s) => ({
+        ...s,
+        reasoning: s.reasoning + event.delta,
+      }))
+    })
 
-    const cleanupComplete = window.electronAPI.onStreamComplete(
-      (event: StreamCompleteEvent) => {
-        // 清理 Map 中的流式状态
-        removeState(event.conversationId)
+    const cleanupComplete = window.electronAPI.onStreamComplete((event: StreamCompleteEvent) => {
+      removeState(event.conversationId)
 
-        // 仅当完成的是当前对话时，重新加载消息
-        if (event.conversationId === currentConvIdRef.current) {
-          window.electronAPI
-            .getConversationMessages(event.conversationId)
-            .then((msgs) => {
-              setCurrentMessages(msgs)
-              setHasMoreMessages(false)
-            })
-            .catch(console.error)
-        }
-
-        // 刷新对话列表（updatedAt 已更新）
+      if (event.conversationId === currentConvIdRef.current) {
         window.electronAPI
-          .listConversations()
-          .then(setConversations)
-          .catch(console.error)
-
-        // 第一条消息回复完成后，生成对话标题
-        const titleInput = pendingTitleRef.current.get(event.conversationId)
-        console.log('[ChatView] 流式完成 - conversationId:', event.conversationId, 'titleInput:', titleInput)
-        if (titleInput) {
-          pendingTitleRef.current.delete(event.conversationId)
-          console.log('[ChatView] 开始生成标题:', titleInput)
-          window.electronAPI.generateTitle(titleInput).then((title) => {
-            console.log('[ChatView] 标题生成结果:', title)
-            if (!title) return
-            window.electronAPI
-              .updateConversationTitle(event.conversationId, title)
-              .then((updated) => {
-                console.log('[ChatView] 标题更新成功:', updated.title)
-                setConversations((prev) =>
-                  prev.map((c) => (c.id === updated.id ? updated : c))
-                )
-              })
-              .catch(console.error)
-          }).catch((error) => {
-            console.error('[ChatView] 标题生成失败:', error)
+          .getConversationMessages(event.conversationId)
+          .then((msgs) => {
+            setCurrentMessages(msgs)
+            setHasMoreMessages(false)
           })
-        }
+          .catch(console.error)
       }
-    )
 
-    const cleanupError = window.electronAPI.onStreamError(
-      (event: StreamErrorEvent) => {
-        console.error('[ChatView] 流式错误:', event.error)
+      window.electronAPI
+        .listConversations()
+        .then(setConversations)
+        .catch(console.error)
 
-        // 清理 Map 中的流式状态
-        removeState(event.conversationId)
-
-        // 存储错误消息，供 UI 显示
-        setChatStreamErrors((prev) => {
-          const map = new Map(prev)
-          map.set(event.conversationId, event.error)
-          return map
-        })
-
-        // 仅当错误的是当前对话时，重新加载消息
-        if (event.conversationId === currentConvIdRef.current) {
+      const titleInput = pendingTitleRef.current.get(event.conversationId)
+      if (titleInput) {
+        pendingTitleRef.current.delete(event.conversationId)
+        window.electronAPI.generateTitle(titleInput).then((title) => {
+          if (!title) return
           window.electronAPI
-            .getConversationMessages(event.conversationId)
-            .then((msgs) => {
-              setCurrentMessages(msgs)
-              setHasMoreMessages(false)
+            .updateConversationTitle(event.conversationId, title)
+            .then((updated) => {
+              setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
             })
             .catch(console.error)
-        }
+        }).catch((error) => {
+          console.error('[ChatView] 标题生成失败:', error)
+        })
       }
-    )
+    })
 
-    const cleanupToolActivity = window.electronAPI.onStreamToolActivity(
-      (event: StreamToolActivityEvent) => {
-        updateState(event.conversationId, (s) => ({
-          ...s,
-          toolActivities: [...s.toolActivities, event.activity],
-        }))
+    const cleanupError = window.electronAPI.onStreamError((event: StreamErrorEvent) => {
+      console.error('[ChatView] 流式错误:', event.error)
+      removeState(event.conversationId)
+
+      setChatStreamErrors((prev) => {
+        const map = new Map(prev)
+        map.set(event.conversationId, event.error)
+        return map
+      })
+
+      if (event.conversationId === currentConvIdRef.current) {
+        window.electronAPI
+          .getConversationMessages(event.conversationId)
+          .then((msgs) => {
+            setCurrentMessages(msgs)
+            setHasMoreMessages(false)
+          })
+          .catch(console.error)
       }
-    )
+    })
+
+    const cleanupToolActivity = window.electronAPI.onStreamToolActivity((event: StreamToolActivityEvent) => {
+      updateState(event.conversationId, (s) => ({
+        ...s,
+        toolActivities: [...s.toolActivities, event.activity],
+      }))
+    })
 
     return () => {
       cleanupChunk()
@@ -274,21 +303,32 @@ export function ChatView(): React.ReactElement {
     return newDividers
   }, [setContextDividers])
 
-  /** 发送消息 */
+  /** 发送消息（直发，不排队） */
   const handleSend = React.useCallback(async (
     content: string,
-    options?: {
-      attachments?: FileAttachment[]
-      consumePendingAttachments?: boolean
-      messageCountBeforeSend?: number
-      contextDividersOverride?: string[]
-    },
-  ): Promise<void> => {
-    if (!currentConversationId || !selectedModel) return
+    options?: SendOptions,
+  ): Promise<boolean> => {
+    if (!currentConversationId || !selectedModel) return false
 
+    if (isStreaming) {
+      toast.error('请先停止当前回复后再发送')
+      return false
+    }
+
+    const trimmedContent = content.trim()
     const consumePending = options?.consumePendingAttachments ?? true
+    let savedAttachments: FileAttachment[] = options?.attachments ?? []
+    let cleanupAttachmentsOnError: FileAttachment[] = options?.cleanupAttachmentsOnError ?? []
 
-    // 清除当前对话的错误消息
+    if (consumePending) {
+      savedAttachments = await snapshotPendingAttachments(currentConversationId)
+      cleanupAttachmentsOnError = savedAttachments
+    }
+
+    if (!trimmedContent && savedAttachments.length === 0) {
+      return false
+    }
+
     setChatStreamErrors((prev) => {
       if (!prev.has(currentConversationId)) return prev
       const map = new Map(prev)
@@ -296,56 +336,20 @@ export function ChatView(): React.ReactElement {
       return map
     })
 
-    // 判断是否为第一条消息（发送前历史为空）
     const messageCountBeforeSend = options?.messageCountBeforeSend ?? currentMessages.length
     const isFirstMessage = messageCountBeforeSend === 0
-    console.log('[ChatView] 发送消息 - isFirstMessage:', isFirstMessage, 'messageCountBeforeSend:', messageCountBeforeSend, 'conversationId:', currentConversationId)
-    if (isFirstMessage && content) {
-      console.log('[ChatView] 设置待生成标题:', { conversationId: currentConversationId, userMessage: content.slice(0, 50) })
-      pendingTitleRef.current.set(currentConversationId, {
-        userMessage: content,
+    const titleInput = isFirstMessage && trimmedContent
+      ? {
+        userMessage: trimmedContent,
         channelId: selectedModel.channelId,
         modelId: selectedModel.modelId,
-      })
+      }
+      : undefined
+
+    if (titleInput) {
+      pendingTitleRef.current.set(currentConversationId, titleInput)
     }
 
-    let savedAttachments: FileAttachment[] = options?.attachments ?? []
-
-    if (consumePending) {
-      // 获取当前待发送附件的快照
-      const currentAttachments = [...pendingAttachments]
-
-      // 保存附件到磁盘（通过 IPC）
-      savedAttachments = []
-      for (const att of currentAttachments) {
-        const base64Data = window.__pendingAttachmentData?.get(att.id)
-        if (!base64Data) continue
-
-        try {
-          const input: AttachmentSaveInput = {
-            conversationId: currentConversationId,
-            filename: att.filename,
-            mediaType: att.mediaType,
-            data: base64Data,
-          }
-          const result = await window.electronAPI.saveAttachment(input)
-          savedAttachments.push(result.attachment)
-        } catch (error) {
-          console.error('[ChatView] 保存附件失败:', error)
-        }
-      }
-
-      // 清理 pending 附件和临时缓存
-      for (const att of currentAttachments) {
-        if (att.previewUrl?.startsWith('blob:')) {
-          URL.revokeObjectURL(att.previewUrl)
-        }
-        window.__pendingAttachmentData?.delete(att.id)
-      }
-      setPendingAttachments([])
-    }
-
-    // 初始化当前对话的流式状态
     setStreamingStates((prev) => {
       const map = new Map(prev)
       map.set(currentConversationId, {
@@ -358,53 +362,80 @@ export function ChatView(): React.ReactElement {
       return map
     })
 
-    const input: ChatSendInput = {
-      conversationId: currentConversationId,
-      userMessage: content,
-      messageHistory: [], // 后端已改为从磁盘读取完整历史，无需前端传入
-      channelId: selectedModel.channelId,
-      modelId: selectedModel.modelId,
-      contextLength,
-      contextDividers: options?.contextDividersOverride ?? contextDividers,
-      attachments: savedAttachments.length > 0 ? savedAttachments : undefined,
-      thinkingEnabled: thinkingEnabled || undefined,
-      systemMessage: resolvedSystemMessage,
+    if (currentConversationId === currentConvIdRef.current) {
+      setCurrentMessages((prev) => [
+        ...prev,
+        {
+          id: `temp-${Date.now()}`,
+          role: 'user',
+          content: trimmedContent,
+          createdAt: Date.now(),
+          attachments: savedAttachments.length > 0 ? savedAttachments : undefined,
+        },
+      ])
     }
 
-    // 乐观更新：立即在 UI 中显示用户消息
-    setCurrentMessages((prev) => [
-      ...prev,
-      {
-        id: `temp-${Date.now()}`,
-        role: 'user',
-        content,
-        createdAt: Date.now(),
-        attachments: savedAttachments.length > 0 ? savedAttachments : undefined,
-      },
-    ])
+    const requestId = `chat-request-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
-    window.electronAPI.sendMessage(input).catch((error) => {
-      console.error('[ChatView] 发送消息失败:', error)
+    try {
+      await window.electronAPI.sendMessage({
+        requestId,
+        conversationId: currentConversationId,
+        userMessage: trimmedContent,
+        messageHistory: [],
+        channelId: selectedModel.channelId,
+        modelId: selectedModel.modelId,
+        contextLength,
+        contextDividers: options?.contextDividersOverride ?? contextDividers,
+        attachments: savedAttachments.length > 0 ? savedAttachments : undefined,
+        thinkingEnabled: thinkingEnabled || undefined,
+        systemMessage: resolvedSystemMessage,
+      })
+      return true
+    } catch (error) {
+      console.error('[ChatView] 发送失败:', error)
+      pendingTitleRef.current.delete(currentConversationId)
+
       setStreamingStates((prev) => {
         if (!prev.has(currentConversationId)) return prev
         const map = new Map(prev)
         map.delete(currentConversationId)
         return map
       })
-    })
+
+      if (currentConversationId === currentConvIdRef.current) {
+        window.electronAPI
+          .getConversationMessages(currentConversationId)
+          .then((msgs) => {
+            setCurrentMessages(msgs)
+            setHasMoreMessages(false)
+          })
+          .catch(console.error)
+      }
+
+      await cleanupAttachments(cleanupAttachmentsOnError)
+      setChatStreamErrors((prev) => {
+        const map = new Map(prev)
+        map.set(currentConversationId, error instanceof Error ? error.message : '发送失败')
+        return map
+      })
+      return false
+    }
   }, [
     currentConversationId,
     selectedModel,
+    isStreaming,
+    snapshotPendingAttachments,
+    setChatStreamErrors,
     currentMessages.length,
-    pendingAttachments,
+    setStreamingStates,
+    setCurrentMessages,
     contextLength,
     contextDividers,
     thinkingEnabled,
     resolvedSystemMessage,
-    setChatStreamErrors,
-    setPendingAttachments,
-    setStreamingStates,
-    setCurrentMessages,
+    setHasMoreMessages,
+    cleanupAttachments,
   ])
 
   /** 从某条消息起截断（包含该条） */
@@ -457,10 +488,9 @@ export function ChatView(): React.ReactElement {
   ])
 
   /** 停止生成 */
-  const handleStop = (): void => {
+  const handleStop = React.useCallback((): void => {
     if (!currentConversationId) return
-    // 标记 streaming=false（按钮即时变化），不清空内容
-    // 内容保留在 UI 直到 onStreamComplete 原子性替换为磁盘消息，避免闪烁
+
     setStreamingStates((prev) => {
       const current = prev.get(currentConversationId)
       if (!current) return prev
@@ -468,8 +498,9 @@ export function ChatView(): React.ReactElement {
       map.set(currentConversationId, { ...current, streaming: false })
       return map
     })
+
     window.electronAPI.stopGeneration(currentConversationId).catch(console.error)
-  }
+  }, [currentConversationId, setStreamingStates])
 
   /** 删除消息 */
   const handleDeleteMessage = async (messageId: string): Promise<void> => {
@@ -551,6 +582,7 @@ export function ChatView(): React.ReactElement {
 
       await handleSend(trimmed, {
         attachments: [...payload.keepExistingAttachments, ...newSavedAttachments],
+        cleanupAttachmentsOnError: newSavedAttachments,
         consumePendingAttachments: false,
         messageCountBeforeSend: truncated.messageCountBeforeSend,
         contextDividersOverride: truncated.contextDividersAfterTruncate,
@@ -570,10 +602,8 @@ export function ChatView(): React.ReactElement {
 
     let newDividers: string[]
     if (contextDividers.includes(lastMessageId)) {
-      // 已有分隔线 → 删除
       newDividers = contextDividers.filter((id) => id !== lastMessageId)
     } else {
-      // 无分隔线 → 添加
       newDividers = [...contextDividers, lastMessageId]
     }
 
@@ -603,7 +633,6 @@ export function ChatView(): React.ReactElement {
     setHasMoreMessages(false)
   }, [currentConversationId, setCurrentMessages, setHasMoreMessages])
 
-  // 无当前对话 → 引导文案
   if (!currentConversationId) {
     return (
       <div className="flex flex-col items-center justify-center h-full w-full max-w-[min(72rem,100%)] mx-auto gap-4 text-muted-foreground" style={{ zoom: 1.1 }}>
@@ -622,12 +651,9 @@ export function ChatView(): React.ReactElement {
 
   return (
     <div className="flex h-full overflow-hidden">
-      {/* 主内容区域 */}
       <div className="flex flex-col h-full flex-1 min-w-0">
-        {/* Header 在 max-w 外，按钮可到达最右侧 */}
         <ChatHeader />
         <div className="flex flex-col flex-1 w-full max-w-[min(72rem,100%)] mx-auto overflow-hidden min-h-0">
-          {/* 中间：消息区域 */}
           <ChatMessages
             onDeleteMessage={handleDeleteMessage}
             onResendMessage={handleResendMessage}
@@ -639,7 +665,6 @@ export function ChatView(): React.ReactElement {
             onLoadMore={handleLoadMore}
           />
 
-          {/* 错误提示 */}
           {chatError && (
             <div className="mx-4 mb-2 px-4 py-2.5 rounded-lg bg-destructive/10 text-destructive text-sm flex items-center gap-2">
               <AlertCircle className="size-4 shrink-0" />
@@ -661,7 +686,6 @@ export function ChatView(): React.ReactElement {
             </div>
           )}
 
-          {/* 底部：输入框 */}
           <ChatInput
             onSend={handleSend}
             onStop={handleStop}
@@ -670,7 +694,6 @@ export function ChatView(): React.ReactElement {
         </div>
       </div>
 
-      {/* 提示词编辑侧栏 */}
       <div className={cn(
         'relative flex-shrink-0 transition-[width] duration-300 ease-in-out overflow-hidden titlebar-drag-region',
         promptSidebarOpen ? 'w-[300px] border-l' : 'w-10'

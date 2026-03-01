@@ -79,6 +79,8 @@ export interface ChatMessage {
   stopped?: boolean
   /** 文件附件列表 */
   attachments?: FileAttachment[]
+  /** 请求幂等键（仅 user 消息写入） */
+  requestId?: string
 }
 
 // ===== 对话相关 =====
@@ -136,6 +138,8 @@ export interface ConversationMeta {
  * 发送消息的输入参数
  */
 export interface ChatSendInput {
+  /** 请求幂等键（通常使用队列任务 ID） */
+  requestId: string
   /** 对话 ID */
   conversationId: string
   /** 用户消息内容 */
@@ -157,6 +161,16 @@ export interface ChatSendInput {
   /** 是否启用思考模式 */
   thinkingEnabled?: boolean
 }
+
+/** Chat 流式错误码 */
+export type ChatStreamErrorCode =
+  | 'channel_not_found'
+  | 'api_key_decrypt_failed'
+  | 'network_error'
+  | 'rate_limit'
+  | 'server_error'
+  | 'provider_error'
+  | 'unknown_error'
 
 // ===== 标题生成 =====
 
@@ -214,6 +228,12 @@ export interface StreamErrorEvent {
   conversationId: string
   /** 错误信息 */
   error: string
+  /** 错误码（用于重试策略） */
+  errorCode: ChatStreamErrorCode
+  /** 是否可自动重试 */
+  retriable: boolean
+  /** 请求幂等键 */
+  requestId?: string
 }
 
 /**

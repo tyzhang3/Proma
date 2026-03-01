@@ -7,7 +7,14 @@
 
 import { atom } from 'jotai'
 import { atomWithStorage } from 'jotai/utils'
-import type { ConversationMeta, ChatMessage, FileAttachment, ChatToolActivity } from '@proma/shared'
+import type {
+  ConversationMeta,
+  ChatMessage,
+  FileAttachment,
+  ChatToolActivity,
+  ChatSendInput,
+  GenerateTitleInput,
+} from '@proma/shared'
 
 /** 选中的模型信息 */
 interface SelectedModel {

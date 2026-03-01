@@ -215,11 +215,13 @@ const MAX_CONTEXT_MESSAGES = 20
  * 当 resume 不可用时，将最近消息拼接为上下文注入 prompt，
  * 让新 SDK 会话保留对话记忆。仅取 user/assistant 角色的文本内容。
  */
-function buildContextPrompt(sessionId: string, currentUserMessage: string): string {
+function buildContextPrompt(sessionId: string, currentUserMessage: string, requestId?: string): string {
   const allMessages = getAgentSessionMessages(sessionId)
   if (allMessages.length === 0) return currentUserMessage
 
-  const history = allMessages.slice(0, -1)
+  const history = requestId
+    ? allMessages.filter((msg) => !(msg.role === 'user' && msg.requestId === requestId))
+    : allMessages.slice(0, -1)
   if (history.length === 0) return currentUserMessage
 
   const recent = history.slice(-MAX_CONTEXT_MESSAGES)
@@ -512,7 +514,7 @@ export class AgentOrchestrator {
    * 通过 EventBus 分发 AgentEvent，通过 callbacks 发送控制信号。
    */
   async sendMessage(input: AgentSendInput, callbacks: SessionCallbacks): Promise<void> {
-    const { sessionId, userMessage, channelId, modelId, workspaceId } = input
+    const { requestId, sessionId, userMessage, channelId, modelId, workspaceId } = input
     const stderrChunks: string[] = []
 
     // 0. 并发保护
@@ -569,13 +571,19 @@ export class AgentOrchestrator {
     console.log(`[Agent 编排] 会话 resume 状态: sdkSessionId=${existingSdkSessionId || '无'}`)
 
     // 5. 持久化用户消息
-    const userMsg: AgentMessage = {
-      id: randomUUID(),
-      role: 'user',
-      content: userMessage,
-      createdAt: Date.now(),
+    const alreadyAppended = requestId
+      ? getAgentSessionMessages(sessionId).some((msg) => msg.role === 'user' && msg.requestId === requestId)
+      : false
+    if (!alreadyAppended) {
+      const userMsg: AgentMessage = {
+        id: randomUUID(),
+        role: 'user',
+        content: userMessage,
+        createdAt: Date.now(),
+        requestId,
+      }
+      appendAgentMessage(sessionId, userMsg)
     }
-    appendAgentMessage(sessionId, userMsg)
 
     // 6. 注册活跃会话
     this.activeSessions.add(sessionId)
@@ -652,7 +660,7 @@ export class AgentOrchestrator {
         ? '/compact'
         : existingSdkSessionId
           ? contextualMessage
-          : buildContextPrompt(sessionId, contextualMessage)
+          : buildContextPrompt(sessionId, contextualMessage, requestId)
 
       if (existingSdkSessionId) {
         console.log(`[Agent 编排] 使用 resume 模式，SDK session ID: ${existingSdkSessionId}`)

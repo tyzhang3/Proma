@@ -10,8 +10,8 @@
  * 所有业务逻辑已委托给 AgentOrchestrator。
  */
 
-import { join, dirname } from 'node:path'
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { join, dirname, resolve, basename, extname, relative, isAbsolute } from 'node:path'
+import { writeFileSync, mkdirSync, existsSync, statSync, copyFileSync } from 'node:fs'
 import { cp, readdir } from 'node:fs/promises'
 import type { WebContents } from 'electron'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
@@ -21,7 +21,10 @@ import type {
   AgentSaveFilesInput,
   AgentSavedFile,
   AgentCopyFolderInput,
+  AgentSnapshotSessionFilesInput,
   AgentStreamEvent,
+  AgentStreamErrorPayload,
+  ErrorCode,
 } from '@proma/shared'
 import { ClaudeAgentAdapter } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
@@ -41,6 +44,62 @@ function resolveSessionDir(input: { workspaceId?: string; workspaceSlug: string;
 const eventBus = new AgentEventBus()
 const adapter = new ClaudeAgentAdapter()
 const orchestrator = new AgentOrchestrator(adapter, eventBus)
+
+interface ClassifiedAgentError {
+  errorCode: ErrorCode
+  retriable: boolean
+  error: string
+}
+
+function classifyAgentError(error: string): ClassifiedAgentError {
+  const lower = error.toLowerCase()
+
+  if (lower.includes('渠道不存在')) {
+    return { errorCode: 'invalid_request', retriable: false, error }
+  }
+
+  if (lower.includes('解密 api key 失败')) {
+    return { errorCode: 'invalid_credentials', retriable: false, error }
+  }
+
+  if (lower.includes('会话正在处理中') || lower.includes('上一条消息仍在处理中')) {
+    return { errorCode: 'service_unavailable', retriable: true, error }
+  }
+
+  if (lower.includes('429') || lower.includes('rate limit')) {
+    return { errorCode: 'rate_limited', retriable: true, error }
+  }
+
+  const statusMatch = error.match(/\b([1-5]\d{2})\b/)
+  if (statusMatch) {
+    const statusCode = Number(statusMatch[1])
+    if (statusCode >= 500 && statusCode <= 599) {
+      return { errorCode: 'service_error', retriable: true, error }
+    }
+    if (statusCode >= 400 && statusCode <= 499) {
+      return { errorCode: 'provider_error', retriable: false, error }
+    }
+  }
+
+  if (
+    lower.includes('fetch failed')
+    || lower.includes('network')
+    || lower.includes('econnreset')
+    || lower.includes('etimedout')
+    || lower.includes('timeout')
+    || lower.includes('socket')
+    || lower.includes('enotfound')
+    || lower.includes('eai_again')
+  ) {
+    return { errorCode: 'network_error', retriable: true, error }
+  }
+
+  return { errorCode: 'unknown_error', retriable: false, error }
+}
+
+function sendStreamError(webContents: WebContents, payload: AgentStreamErrorPayload): void {
+  webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, payload)
+}
 
 /**
  * 会话 → webContents 映射
@@ -73,18 +132,35 @@ export async function runAgent(
 ): Promise<void> {
   // 并发检查：保护 sessionWebContents 映射不被覆盖
   if (sessionWebContents.has(input.sessionId)) {
+    const error = '会话正在处理中'
     console.warn(`[Agent 服务] 会话 ${input.sessionId} 已在处理中，拒绝重复请求`)
-    throw new Error('会话正在处理中')
+    if (!webContents.isDestroyed()) {
+      const classified = classifyAgentError(error)
+      sendStreamError(webContents, {
+        sessionId: input.sessionId,
+        requestId: input.requestId,
+        error: classified.error,
+        errorCode: classified.errorCode,
+        retriable: classified.retriable,
+      })
+    }
+    return
   }
 
   sessionWebContents.set(input.sessionId, webContents)
+  let hasErrorEventSent = false
   try {
     await orchestrator.sendMessage(input, {
       onError: (error) => {
         if (!webContents.isDestroyed()) {
-          webContents.send(AGENT_IPC_CHANNELS.STREAM_ERROR, {
+          const classified = classifyAgentError(error)
+          hasErrorEventSent = true
+          sendStreamError(webContents, {
             sessionId: input.sessionId,
-            error,
+            requestId: input.requestId,
+            error: classified.error,
+            errorCode: classified.errorCode,
+            retriable: classified.retriable,
           })
         }
       },
@@ -105,6 +181,19 @@ export async function runAgent(
         }
       },
     })
+  } catch (error) {
+    if (!hasErrorEventSent && !webContents.isDestroyed()) {
+      const message = error instanceof Error ? error.message : '未知错误'
+      const classified = classifyAgentError(message)
+      sendStreamError(webContents, {
+        sessionId: input.sessionId,
+        requestId: input.requestId,
+        error: classified.error,
+        errorCode: classified.errorCode,
+        retriable: classified.retriable,
+      })
+    }
+    console.error('[Agent 服务] runAgent 执行失败:', error)
   } finally {
     sessionWebContents.delete(input.sessionId)
   }
@@ -202,5 +291,74 @@ export async function copyFolderToSession(input: AgentCopyFolderInput): Promise<
   await collectFiles(targetDir, sessionDir)
 
   console.log(`[Agent 服务] 文件夹复制完成，共 ${results.length} 个文件`)
+  return results
+}
+
+function isPathInside(baseDir: string, candidatePath: string): boolean {
+  const rel = relative(baseDir, candidatePath)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+/**
+ * 快照 session 目录内文件到队列目录
+ *
+ * 目标路径：
+ * {sessionDir}/.proma-queue/{queueId}/refs/{displayName}
+ */
+export function snapshotSessionFiles(input: AgentSnapshotSessionFilesInput): AgentSavedFile[] {
+  const sessionDir = resolveSessionDir(input)
+  const normalizedSessionDir = resolve(sessionDir)
+  const queueRefsDir = join(sessionDir, '.proma-queue', input.queueId, 'refs')
+  const normalizedQueueRefsDir = resolve(queueRefsDir)
+  const results: AgentSavedFile[] = []
+  const usedPaths = new Set<string>()
+
+  for (const file of input.files) {
+    const sourcePath = resolve(file.path)
+    if (!isPathInside(normalizedSessionDir, sourcePath)) {
+      throw new Error(`引用文件超出会话目录范围: ${file.path}`)
+    }
+
+    if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
+      throw new Error(`引用文件不存在或不可读: ${file.path}`)
+    }
+
+    const normalizedDisplay = file.displayName
+      .replace(/\\/g, '/')
+      .split('/')
+      .filter(Boolean)
+      .join('/')
+    const fallbackName = basename(sourcePath)
+    const displayName = normalizedDisplay || fallbackName
+
+    let targetPath = join(queueRefsDir, displayName)
+    let safeTargetPath = resolve(targetPath)
+    if (!isPathInside(normalizedQueueRefsDir, safeTargetPath)) {
+      targetPath = join(queueRefsDir, fallbackName)
+      safeTargetPath = resolve(targetPath)
+    }
+
+    if (usedPaths.has(safeTargetPath) || existsSync(safeTargetPath)) {
+      const extension = extname(safeTargetPath)
+      const targetDir = dirname(safeTargetPath)
+      const baseName = basename(safeTargetPath, extension)
+      let counter = 1
+      let candidate = resolve(targetDir, `${baseName}-${counter}${extension}`)
+      while (usedPaths.has(candidate) || existsSync(candidate)) {
+        counter++
+        candidate = resolve(targetDir, `${baseName}-${counter}${extension}`)
+      }
+      safeTargetPath = candidate
+    }
+
+    usedPaths.add(safeTargetPath)
+
+    mkdirSync(dirname(safeTargetPath), { recursive: true })
+    copyFileSync(sourcePath, safeTargetPath)
+
+    const actualFilename = safeTargetPath.slice(sessionDir.length + 1)
+    results.push({ filename: actualFilename, targetPath: safeTargetPath })
+  }
+
   return results
 }

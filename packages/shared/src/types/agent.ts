@@ -255,6 +255,8 @@ export interface AgentMessage {
   errorCanRetry?: boolean
   /** 错误恢复操作（status 消息） */
   errorActions?: RecoveryAction[]
+  /** 请求幂等键（仅 user 消息写入） */
+  requestId?: string
 }
 
 // ===== Agent 标题生成输入 =====
@@ -335,6 +337,8 @@ export interface AgentSkillStorageInfo {
  * Agent 发送消息的输入参数
  */
 export interface AgentSendInput {
+  /** 请求幂等键（通常使用队列任务 ID） */
+  requestId?: string
   /** 会话 ID */
   sessionId: string
   /** 用户消息内容 */
@@ -401,6 +405,16 @@ export interface AgentStreamCompletePayload {
   sessionId: string
   /** 已持久化的完整消息列表 */
   messages?: AgentMessage[]
+}
+
+/** Agent 流式错误事件载荷（主进程 → 渲染进程） */
+export interface AgentStreamErrorPayload {
+  sessionId: string
+  error: string
+  errorCode: ErrorCode
+  retriable: boolean
+  /** 请求幂等键（用于匹配队列任务） */
+  requestId?: string
 }
 
 // ===== 文件浏览器 =====
@@ -471,6 +485,18 @@ export interface AgentCopyFolderInput {
   workspaceId?: string
   workspaceSlug: string
   sessionId: string
+}
+
+/** Agent 快照引用文件到 session 队列目录的输入 */
+export interface AgentSnapshotSessionFilesInput {
+  workspaceId?: string
+  workspaceSlug: string
+  sessionId: string
+  queueId: string
+  files: Array<{
+    path: string
+    displayName: string
+  }>
 }
 
 // ===== AskUserQuestion 交互式问答类型 =====
@@ -631,6 +657,8 @@ export const AGENT_IPC_CHANNELS = {
   OPEN_FOLDER_DIALOG: 'agent:open-folder-dialog',
   /** 复制文件夹到 session 工作目录 */
   COPY_FOLDER_TO_SESSION: 'agent:copy-folder-to-session',
+  /** 快照引用文件到 session 队列目录 */
+  SNAPSHOT_SESSION_FILES: 'agent:snapshot-session-files',
 
   // 文件系统操作
   /** 获取 session 工作路径 */

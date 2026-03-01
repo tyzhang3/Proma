@@ -40,7 +40,7 @@ import { cn } from '@/lib/utils'
 
 interface ChatInputProps {
   /** 发送消息回调 */
-  onSend: (content: string) => void
+  onSend: (content: string) => boolean | Promise<boolean>
   /** 停止生成回调 */
   onStop: () => void
   /** 清除上下文回调 */
@@ -64,7 +64,11 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
-export function ChatInput({ onSend, onStop, onClearContext }: ChatInputProps): React.ReactElement {
+export function ChatInput({
+  onSend,
+  onStop,
+  onClearContext,
+}: ChatInputProps): React.ReactElement {
   const [content, setContent] = useAtom(currentConversationDraftAtom)
   const selectedModel = useAtomValue(selectedModelAtom)
   const streaming = useAtomValue(streamingAtom)
@@ -73,9 +77,8 @@ export function ChatInput({ onSend, onStop, onClearContext }: ChatInputProps): R
   const currentConversationId = useAtomValue(currentConversationIdAtom)
   const [isDragOver, setIsDragOver] = React.useState(false)
 
-  const canSend = (content.trim().length > 0 || pendingAttachments.length > 0)
+  const canSubmit = (content.trim().length > 0 || pendingAttachments.length > 0)
     && selectedModel !== null
-    && !streaming
 
   /**
    * 将文件列表添加为附件
@@ -162,12 +165,13 @@ export function ChatInput({ onSend, onStop, onClearContext }: ChatInputProps): R
   }, [setPendingAttachments])
 
   /** 发送消息 */
-  const handleSend = React.useCallback((): void => {
-    if (!canSend) return
-    onSend(content.trim())
-    setContent('')
-    // 附件清理由 ChatView 的 handleSend 负责
-  }, [canSend, content, onSend])
+  const handleSend = React.useCallback(async (): Promise<void> => {
+    if (!canSubmit) return
+    const sent = await onSend(content.trim())
+    if (sent) {
+      setContent('')
+    }
+  }, [canSubmit, content, onSend, setContent])
 
   /** 语音识别结果 */
   const handleSpeechTranscript = React.useCallback((text: string): void => {
@@ -217,131 +221,135 @@ export function ChatInput({ onSend, onStop, onClearContext }: ChatInputProps): R
 
   return (
     <div className="px-2.5 pb-2.5 md:px-[18px] md:pb-[18px] pt-2">
-        {/* 卡片式输入容器 — 对标 Cherry Studio: border-radius 17px, 0.5px border */}
-        <div
-          className={cn(
-            'rounded-[17px] border-[0.5px] border-border bg-background/70 backdrop-blur-sm pt-2 transition-all duration-200',
-            'focus-within:border-foreground/20',
-            isDragOver && 'border-[2px] border-dashed border-[#2ecc71] bg-[#2ecc71]/[0.03]'
-          )}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-        >
-          {/* 附件预览区域 — Cherry Studio: padding 5px 15px, flex-wrap, gap 4px */}
-          {pendingAttachments.length > 0 && (
-            <div className="flex flex-wrap gap-1 px-[15px] py-[5px]">
-              {pendingAttachments.map((att) => (
-                <AttachmentPreviewItem
-                  key={att.id}
-                  filename={att.filename}
-                  mediaType={att.mediaType}
-                  previewUrl={att.previewUrl}
-                  onRemove={() => handleRemoveAttachment(att.id)}
-                />
-              ))}
-            </div>
-          )}
+      {/* 卡片式输入容器 — 对标 Cherry Studio: border-radius 17px, 0.5px border */}
+      <div
+        className={cn(
+          'rounded-[17px] border-[0.5px] border-border bg-background/70 backdrop-blur-sm pt-2 transition-all duration-200',
+          'focus-within:border-foreground/20',
+          isDragOver && 'border-[2px] border-dashed border-[#2ecc71] bg-[#2ecc71]/[0.03]'
+        )}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {/* 附件预览区域 — Cherry Studio: padding 5px 15px, flex-wrap, gap 4px */}
+        {pendingAttachments.length > 0 && (
+          <div className="flex flex-wrap gap-1 px-[15px] py-[5px]">
+            {pendingAttachments.map((att) => (
+              <AttachmentPreviewItem
+                key={att.id}
+                filename={att.filename}
+                mediaType={att.mediaType}
+                previewUrl={att.previewUrl}
+                onRemove={() => handleRemoveAttachment(att.id)}
+              />
+            ))}
+          </div>
+        )}
 
-          {/* TipTap 富文本编辑器 */}
-          <RichTextInput
-            value={content}
-            onChange={setContent}
-            onSubmit={handleSend}
-            onPasteFiles={handlePasteFiles}
-            placeholder={
-              selectedModel
-                ? '输入消息... (Enter 发送，Shift+Enter 换行。支持拖放文件和直接粘贴图片)'
-                : '请先选择模型'
-            }
-            disabled={!selectedModel}
-            autoFocusTrigger={currentConversationId}
-          />
+        {/* TipTap 富文本编辑器 */}
+        <RichTextInput
+          value={content}
+          onChange={setContent}
+          onSubmit={() => {
+            void handleSend()
+          }}
+          onPasteFiles={handlePasteFiles}
+          placeholder={
+            selectedModel
+              ? '输入消息... (Enter 发送，Shift+Enter 换行。支持拖放文件和直接粘贴图片)'
+              : '请先选择模型'
+          }
+          disabled={!selectedModel}
+          autoFocusTrigger={currentConversationId}
+        />
 
-          {/* Footer 工具栏 — Cherry Studio: padding 5px 8px, height 40px, gap 16px */}
-          <div className="flex items-center justify-between px-2 py-[5px] h-[40px] gap-4">
-            {/* 左侧工具按钮 */}
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
-              {/* 附件按钮 */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-[30px] rounded-full text-foreground/60 hover:text-foreground"
-                    onClick={handleOpenFileDialog}
-                  >
-                    <Paperclip className="size-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>添加附件</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <ModelSelector />
-
-              {/* 思考模式切换 */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className={cn(
-                      'size-[30px] rounded-full',
-                      thinkingEnabled ? 'text-green-500' : 'text-foreground/60 hover:text-foreground'
-                    )}
-                    onClick={() => setThinkingEnabled(!thinkingEnabled)}
-                  >
-                    <Lightbulb className="size-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>{thinkingEnabled ? '关闭思考模式' : '开启思考模式'}</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <SpeechButton onTranscript={handleSpeechTranscript} />
-
-              <ContextSettingsPopover />
-
-              <ClearContextButton onClick={onClearContext} />
-            </div>
-
-            {/* 右侧：发送 / 停止按钮 */}
-            <div className="flex items-center gap-1.5">
-              {streaming ? (
+        {/* Footer 工具栏 — Cherry Studio: padding 5px 8px, height 40px, gap 16px */}
+        <div className="flex items-center justify-between px-2 py-[5px] h-[40px] gap-4">
+          {/* 左侧工具按钮 */}
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            {/* 附件按钮 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="size-[30px] rounded-full text-destructive hover:bg-destructive/10"
-                  onClick={onStop}
+                  className="size-[30px] rounded-full text-foreground/60 hover:text-foreground"
+                  onClick={handleOpenFileDialog}
                 >
-                  <Square className="size-[22px]" />
+                  <Paperclip className="size-5" />
                 </Button>
-              ) : (
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p>添加附件</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <ModelSelector />
+
+            {/* 思考模式切换 */}
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
                   className={cn(
                     'size-[30px] rounded-full',
-                    canSend
-                      ? 'text-primary hover:bg-primary/10'
-                      : 'text-foreground/30 cursor-not-allowed'
+                    thinkingEnabled ? 'text-green-500' : 'text-foreground/60 hover:text-foreground'
                   )}
-                  onClick={handleSend}
-                  disabled={!canSend}
+                  onClick={() => setThinkingEnabled(!thinkingEnabled)}
                 >
-                  <CornerDownLeft className="size-[22px]" />
+                  <Lightbulb className="size-5" />
                 </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p>{thinkingEnabled ? '关闭思考模式' : '开启思考模式'}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <SpeechButton onTranscript={handleSpeechTranscript} />
+
+            <ContextSettingsPopover />
+
+            <ClearContextButton onClick={onClearContext} />
+          </div>
+
+          {/* 右侧：发送 / 停止按钮 */}
+          <div className="flex items-center gap-1.5">
+            {streaming && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-[30px] rounded-full text-destructive hover:bg-destructive/10"
+                onClick={onStop}
+              >
+                <Square className="size-[22px]" />
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn(
+                'size-[30px] rounded-full',
+                canSubmit
+                  ? 'text-primary hover:bg-primary/10'
+                  : 'text-foreground/30 cursor-not-allowed'
               )}
-            </div>
+              onClick={() => {
+                void handleSend()
+              }}
+              disabled={!canSubmit}
+              title="发送"
+            >
+              <CornerDownLeft className={cn(streaming ? 'size-[20px]' : 'size-[22px]')} />
+            </Button>
           </div>
         </div>
+      </div>
     </div>
   )
 }

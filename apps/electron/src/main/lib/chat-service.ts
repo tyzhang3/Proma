@@ -15,7 +15,16 @@
 import { randomUUID } from 'node:crypto'
 import type { WebContents } from 'electron'
 import { CHAT_IPC_CHANNELS } from '@proma/shared'
-import type { ChatSendInput, ChatMessage, GenerateTitleInput, FileAttachment, MemoryConfig } from '@proma/shared'
+import type {
+  ChatSendInput,
+  ChatMessage,
+  GenerateTitleInput,
+  FileAttachment,
+  MemoryConfig,
+  ChatStreamErrorCode,
+} from '@proma/shared'
+import { classifyChatError } from './chat-error-classifier'
+import type { ClassifiedChatError } from './chat-error-classifier'
 import {
   getAdapter,
   streamSSE,
@@ -26,6 +35,7 @@ import { listChannels, decryptApiKey } from './channel-manager'
 import { appendMessage, updateConversationMeta, getConversationMessages } from './conversation-manager'
 import { readAttachmentAsBase64, isImageAttachment } from './attachment-service'
 import { extractTextFromAttachment, isDocumentAttachment } from './document-parser'
+import { hasUserMessageWithRequestId, stripUserMessageByRequestId } from './chat-request-idempotency'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { getMemoryConfig } from './memory-service'
@@ -84,6 +94,20 @@ const MEMORY_SYSTEM_PROMPT = `
 
 /** 最大工具续接轮数（防止无限循环） */
 const MAX_TOOL_ROUNDS = 5
+
+function sendStreamError(
+  webContents: WebContents,
+  payload: {
+    conversationId: string
+    requestId: string
+    error: string
+    errorCode: ChatStreamErrorCode
+    retriable: boolean
+  },
+): void {
+  webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, payload)
+}
+
 
 // ===== 平台相关：图片附件读取器 =====
 
@@ -289,6 +313,7 @@ export async function sendMessage(
   webContents: WebContents,
 ): Promise<void> {
   const {
+    requestId,
     conversationId, userMessage, channelId,
     modelId, systemMessage, contextLength, contextDividers, attachments,
     thinkingEnabled,
@@ -298,9 +323,12 @@ export async function sendMessage(
   const channels = listChannels()
   const channel = channels.find((c) => c.id === channelId)
   if (!channel) {
-    webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
+    sendStreamError(webContents, {
       conversationId,
       error: '渠道不存在',
+      errorCode: 'channel_not_found',
+      retriable: false,
+      requestId,
     })
     return
   }
@@ -310,9 +338,12 @@ export async function sendMessage(
   try {
     apiKey = decryptApiKey(channelId)
   } catch {
-    webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
+    sendStreamError(webContents, {
       conversationId,
       error: '解密 API Key 失败',
+      errorCode: 'api_key_decrypt_failed',
+      retriable: false,
+      requestId,
     })
     return
   }
@@ -321,17 +352,25 @@ export async function sendMessage(
   const fullHistory = getConversationMessages(conversationId)
 
   // 4. 追加用户消息到 JSONL
-  const userMsg: ChatMessage = {
-    id: randomUUID(),
-    role: 'user',
-    content: userMessage,
-    createdAt: Date.now(),
-    attachments: attachments && attachments.length > 0 ? attachments : undefined,
+  const alreadyAppended = hasUserMessageWithRequestId(fullHistory, requestId)
+
+  if (!alreadyAppended) {
+    const userMsg: ChatMessage = {
+      id: randomUUID(),
+      role: 'user',
+      content: userMessage,
+      createdAt: Date.now(),
+      attachments: attachments && attachments.length > 0 ? attachments : undefined,
+      requestId,
+    }
+    appendMessage(conversationId, userMsg)
   }
-  appendMessage(conversationId, userMsg)
 
   // 5. 过滤历史并提取文档附件文本
-  const filteredHistory = filterHistory(fullHistory, contextDividers, contextLength)
+  const historyForRequest = alreadyAppended
+    ? stripUserMessageByRequestId(fullHistory, requestId)
+    : fullHistory
+  const filteredHistory = filterHistory(historyForRequest, contextDividers, contextLength)
   const enrichedHistory = await enrichHistoryWithDocuments(filteredHistory)
   const enrichedUserMessage = await enrichMessageWithDocuments(userMessage, attachments)
 
@@ -518,11 +557,14 @@ export async function sendMessage(
       return
     }
 
-    const errorMessage = error instanceof Error ? error.message : '未知错误'
+    const classified = classifyChatError(error)
     console.error(`[聊天服务] 流式请求失败:`, error)
-    webContents.send(CHAT_IPC_CHANNELS.STREAM_ERROR, {
+    sendStreamError(webContents, {
       conversationId,
-      error: errorMessage,
+      requestId,
+      error: classified.message,
+      errorCode: classified.errorCode,
+      retriable: classified.retriable,
     })
   } finally {
     activeControllers.delete(conversationId)
