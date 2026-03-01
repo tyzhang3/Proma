@@ -277,9 +277,27 @@ export function getWorkspaceSkillsDir(slug: string): string {
 }
 
 /**
+ * 获取全局共享 Skills 目录路径
+ *
+ * 所有工作区共享同一份 Skill 存储。
+ *
+ * @returns ~/.proma/skills/
+ */
+export function getGlobalSkillsDir(): string {
+  const dir = join(getConfigDir(), 'skills')
+
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+    console.log(`[配置] 已创建全局 Skills 目录: ${dir}`)
+  }
+
+  return dir
+}
+
+/**
  * 获取默认 Skills 模板目录路径
  *
- * 新建工作区时自动复制此目录的内容到工作区 skills/ 下。
+ * 初始化全局 Skills 时会复制此目录的内容。
  *
  * @returns ~/.proma/default-skills/
  */

@@ -30,7 +30,7 @@ import { getAdapter, fetchTitle } from '@proma/core'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendAgentMessage, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages } from './agent-session-manager'
-import { getWorkspaceMcpConfig, ensurePluginManifest, getWorkspacePermissionMode } from './agent-workspace-manager'
+import { getWorkspaceMcpConfig, ensurePluginManifest, ensureWorkspaceSkillsLink, getWorkspacePermissionMode } from './agent-workspace-manager'
 import { getAgentWorkspacePath } from './config-paths'
 import { resolveAgentCwdByWorkspaceId } from './agent-cwd-resolver'
 import { getRuntimeStatus } from './runtime-init'
@@ -626,6 +626,7 @@ export class AgentOrchestrator {
       if (workspace) {
         console.log(`[Agent 编排] 使用工作目录 cwd: ${agentCwd} (${workspace.name}/${sessionId})`)
         ensurePluginManifest(workspace.slug, workspace.name)
+        ensureWorkspaceSkillsLink(workspace.slug)
 
         if (existingSdkSessionId) {
           console.log(`[Agent 编排] 将尝试 resume: ${existingSdkSessionId}`)

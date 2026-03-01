@@ -1,7 +1,7 @@
 /**
  * 工作区文件监听器
  *
- * 使用 fs.watch 递归监听 ~/.proma/agent-workspaces/ 目录，
+ * 使用 fs.watch 递归监听 ~/.proma/agent-workspaces/ 与 ~/.proma/skills/，
  * 根据变化的文件路径区分事件类型：
  * - mcp.json / skills/ 变化 → 推送 CAPABILITIES_CHANGED（侧边栏刷新）
  * - 其他文件变化 → 推送 WORKSPACE_FILES_CHANGED（文件浏览器刷新）
@@ -13,12 +13,12 @@ import { watch, existsSync } from 'node:fs'
 import type { FSWatcher } from 'node:fs'
 import type { BrowserWindow } from 'electron'
 import { AGENT_IPC_CHANNELS } from '@proma/shared'
-import { getAgentWorkspacesDir } from './config-paths'
+import { getAgentWorkspacesDir, getGlobalSkillsDir } from './config-paths'
 
 /** debounce 延迟（ms） */
 const DEBOUNCE_MS = 500
 
-let watcher: FSWatcher | null = null
+const watchers: FSWatcher[] = []
 
 /**
  * 启动工作区文件监听
@@ -26,10 +26,15 @@ let watcher: FSWatcher | null = null
  * @param win 主窗口引用，用于向渲染进程推送事件
  */
 export function startWorkspaceWatcher(win: BrowserWindow): void {
-  const watchDir = getAgentWorkspacesDir()
+  if (watchers.length > 0) {
+    stopWorkspaceWatcher()
+  }
 
-  if (!existsSync(watchDir)) {
-    console.warn('[工作区监听] 目录不存在，跳过:', watchDir)
+  const workspacesDir = getAgentWorkspacesDir()
+  const globalSkillsDir = getGlobalSkillsDir()
+
+  if (!existsSync(workspacesDir)) {
+    console.warn('[工作区监听] 目录不存在，跳过:', workspacesDir)
     return
   }
 
@@ -38,7 +43,7 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
   let filesTimer: ReturnType<typeof setTimeout> | null = null
 
   try {
-    watcher = watch(watchDir, { recursive: true }, (_eventType, filename) => {
+    const workspaceWatcher = watch(workspacesDir, { recursive: true }, (_eventType, filename) => {
       if (!filename || win.isDestroyed()) return
 
       // filename 格式: {slug}/mcp.json 或 {slug}/skills/xxx/SKILL.md 或 {slug}/{sessionId}/file.txt
@@ -68,8 +73,22 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
         }, DEBOUNCE_MS)
       }
     })
+    watchers.push(workspaceWatcher)
 
-    console.log('[工作区监听] 已启动文件监听:', watchDir)
+    const globalSkillsWatcher = watch(globalSkillsDir, { recursive: true }, () => {
+      if (win.isDestroyed()) return
+      if (capabilitiesTimer) clearTimeout(capabilitiesTimer)
+      capabilitiesTimer = setTimeout(() => {
+        if (!win.isDestroyed()) {
+          win.webContents.send(AGENT_IPC_CHANNELS.CAPABILITIES_CHANGED)
+        }
+        capabilitiesTimer = null
+      }, DEBOUNCE_MS)
+    })
+    watchers.push(globalSkillsWatcher)
+
+    console.log('[工作区监听] 已启动文件监听:', workspacesDir)
+    console.log('[工作区监听] 已启动 Skills 监听:', globalSkillsDir)
   } catch (error) {
     console.error('[工作区监听] 启动失败:', error)
   }
@@ -79,9 +98,11 @@ export function startWorkspaceWatcher(win: BrowserWindow): void {
  * 停止工作区文件监听
  */
 export function stopWorkspaceWatcher(): void {
-  if (watcher) {
-    watcher.close()
-    watcher = null
+  if (watchers.length > 0) {
+    for (const watcher of watchers) {
+      watcher.close()
+    }
+    watchers.length = 0
     console.log('[工作区监听] 已停止')
   }
 }

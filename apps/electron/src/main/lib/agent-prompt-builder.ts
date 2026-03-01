@@ -59,7 +59,8 @@ export function buildSystemPromptAppend(ctx: SystemPromptContext): string {
 
 - 工作区名称: ${ctx.workspaceName}
 - MCP 配置: ~/.proma/agent-workspaces/${ctx.workspaceSlug}/mcp.json
-- Skills 目录: ~/.proma/agent-workspaces/${ctx.workspaceSlug}/skills/
+- Skills 目录（全局共享）: ~/.proma/skills/
+- Skills 映射（当前工作区）: ~/.proma/agent-workspaces/${ctx.workspaceSlug}/skills/ -> ~/.proma/skills/
 - 会话目录: ~/.proma/agent-workspaces/${ctx.workspaceSlug}/sessions/${ctx.sessionId}/
 
 ### MCP 配置格式
@@ -86,7 +87,7 @@ mcp.json 的顶层 key 必须是 \`servers\`（不是 mcpServers），示例：
 **重要：顶层 key 是 \`servers\`，绝对不要写成 \`mcpServers\` 或其他名称。**
 
 ### Skill 格式
-每个 Skill 是 skills/{slug}/ 目录下的 SKILL.md 文件：
+每个 Skill 是 ~/.proma/skills/{slug}/ 目录下的 SKILL.md 文件：
 \`\`\`
 ---
 name: 显示名称

@@ -49,6 +49,7 @@ import type {
   WorkspaceMcpConfig,
   SkillMeta,
   WorkspaceCapabilities,
+  AgentSkillStorageInfo,
   FileEntry,
   EnvironmentCheckResult,
   ProxyConfig,
@@ -308,6 +309,9 @@ export interface ElectronAPI {
 
   /** 删除工作区 Skill */
   deleteWorkspaceSkill: (workspaceSlug: string, skillSlug: string) => Promise<void>
+
+  /** 获取 Skill 存储信息 */
+  getSkillStorageInfo: () => Promise<AgentSkillStorageInfo>
 
   /** 订阅 Agent 流式事件（返回清理函数） */
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => () => void
@@ -732,6 +736,10 @@ const electronAPI: ElectronAPI = {
 
   deleteWorkspaceSkill: (workspaceSlug: string, skillSlug: string) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.DELETE_SKILL, workspaceSlug, skillSlug)
+  },
+
+  getSkillStorageInfo: () => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_SKILL_STORAGE_INFO)
   },
 
   onAgentStreamEvent: (callback: (event: AgentStreamEvent) => void) => {

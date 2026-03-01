@@ -25,7 +25,7 @@ import {
 } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
 import { appModeAtom } from '@/atoms/app-mode'
-import type { McpServerEntry, SkillMeta, WorkspaceMcpConfig } from '@proma/shared'
+import type { AgentSkillStorageInfo, McpServerEntry, SkillMeta, WorkspaceMcpConfig } from '@proma/shared'
 import { SettingsSection, SettingsCard, SettingsRow } from './primitives'
 import { McpServerForm } from './McpServerForm'
 
@@ -61,6 +61,10 @@ export function AgentSettings(): React.ReactElement {
   // MCP 配置
   const [mcpConfig, setMcpConfig] = React.useState<WorkspaceMcpConfig>({ servers: {} })
   const [skills, setSkills] = React.useState<SkillMeta[]>([])
+  const [skillStorageInfo, setSkillStorageInfo] = React.useState<AgentSkillStorageInfo>({
+    mode: 'global-shared',
+    globalSkillsPath: '~/.proma/skills/',
+  })
   const [loading, setLoading] = React.useState(true)
 
   /** 加载 MCP 配置和 Skills */
@@ -71,12 +75,14 @@ export function AgentSettings(): React.ReactElement {
     }
 
     try {
-      const [config, skillList] = await Promise.all([
+      const [config, skillList, storageInfo] = await Promise.all([
         window.electronAPI.getWorkspaceMcpConfig(workspaceSlug),
         window.electronAPI.getWorkspaceSkills(workspaceSlug),
+        window.electronAPI.getSkillStorageInfo(),
       ])
       setMcpConfig(config)
       setSkills(skillList)
+      setSkillStorageInfo(storageInfo)
     } catch (error) {
       console.error('[Agent 设置] 加载工作区配置失败:', error)
     } finally {
@@ -140,19 +146,20 @@ mcp.json 格式如下：
 
   /** 构建 Skill 配置提示词 */
   const buildSkillPrompt = (): string => {
-    const skillsDir = `~/.proma/agent-workspaces/${workspaceSlug}/skills/`
+    const skillsDir = skillStorageInfo.globalSkillsPath
     const skillList = skills.length > 0
       ? skills.map((s) => `- ${s.name}: ${s.description ?? '无描述'}`).join('\n')
       : '暂无 Skill'
 
-    return `请帮我配置当前工作区的 Skills，你要主动来帮我实，现你可以采用联网搜索深度研究来尝试，当前环境已经有 Claude Agent SDK 了，除非不确定的时候才来问我，否则默认将帮我完成安装，而不是指导我。
+    return `请帮我配置 Proma 的全局共享 Skills，你要主动来帮我实现，你可以采用联网搜索深度研究来尝试，当前环境已经有 Claude Agent SDK 了，除非不确定的时候才来问我，否则默认将帮我完成安装，而不是指导我。
 
 ## 工作区信息
 - 工作区: ${currentWorkspace.name}
+- Skills 存储模式: 全局共享
 - Skills 目录: ${skillsDir}
 
 ## Skill 格式
-每个 Skill 是 skills/ 目录下的一个子目录，目录名即 slug。
+每个 Skill 是全局 skills 目录下的一个子目录，目录名即 slug。
 目录内包含 SKILL.md 文件，格式：
 
 \`\`\`markdown
@@ -167,7 +174,7 @@ Skill 的详细指令内容...
 ## 当前 Skills
 ${skillList}
 
-请查看 skills/ 目录了解现有配置，根据我的需求创建或编辑 Skill。`
+请查看全局 skills 目录了解现有配置，根据我的需求创建或编辑 Skill。`
   }
 
   /** 通过 Agent 对话完成配置 */
@@ -339,7 +346,7 @@ ${skillList}
       {/* 区块二：Skills（只读） */}
       <SettingsSection
         title="Skills"
-        description="将 SKILL.md 放入工作区 skills/ 目录即可被 Agent 自动发现"
+        description="全局共享：在任意工作区安装后，对所有工作区自动生效"
       >
         {loading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">加载中...</div>
@@ -371,7 +378,7 @@ ${skillList}
           </SettingsCard>
         )}
         <p className="text-xs text-muted-foreground px-1">
-          路径: ~/.proma/agent-workspaces/{workspaceSlug}/skills/
+          路径: {skillStorageInfo.globalSkillsPath}
         </p>
 
         <Button

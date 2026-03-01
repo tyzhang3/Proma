@@ -320,6 +320,15 @@ export interface WorkspaceCapabilities {
   skills: SkillMeta[]
 }
 
+/** Skill 存储模式 */
+export type AgentSkillStorageMode = 'global-shared'
+
+/** Skill 存储信息 */
+export interface AgentSkillStorageInfo {
+  mode: AgentSkillStorageMode
+  globalSkillsPath: string
+}
+
 // ===== Agent 发送输入 =====
 
 /**
@@ -604,6 +613,8 @@ export const AGENT_IPC_CHANNELS = {
   GET_SKILLS: 'agent:get-skills',
   /** 删除工作区 Skill */
   DELETE_SKILL: 'agent:delete-skill',
+  /** 获取 Skill 存储模式与路径 */
+  GET_SKILL_STORAGE_INFO: 'agent:get-skill-storage-info',
 
   // 流式事件（主进程 → 渲染进程推送）
   /** Agent 流式事件 */

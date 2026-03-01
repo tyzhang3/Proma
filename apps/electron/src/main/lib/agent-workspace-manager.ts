@@ -8,19 +8,23 @@
  * 照搬 agent-session-manager.ts 的 readIndex/writeIndex 模式。
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync, accessSync, constants } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync, lstatSync, readlinkSync, accessSync, constants, symlinkSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { isAbsolute, join, resolve } from 'node:path'
 import {
+  getConfigDir,
   getAgentWorkspacesIndexPath,
+  getAgentWorkspacesDir,
   getAgentWorkspacePath,
   getWorkspaceMcpPath,
   getWorkspaceSkillsDir,
   getDefaultSkillsDir,
+  getGlobalSkillsDir,
 } from './config-paths'
 import type {
   AgentWorkspace,
   AgentUpdateWorkspaceInput,
+  AgentSkillStorageInfo,
   McpServerEntry,
   WorkspaceMcpConfig,
   SkillMeta,
@@ -148,24 +152,208 @@ export function getAgentWorkspace(id: string): AgentWorkspace | undefined {
   return workspace ? normalizeWorkspace(workspace) : undefined
 }
 
+const GLOBAL_SKILLS_MIGRATION_MARKER = 'global-skills-v1.done'
+
+function getGlobalSkillsMigrationMarkerPath(): string {
+  const migrationDir = join(getConfigDir(), '.migrations')
+  if (!existsSync(migrationDir)) {
+    mkdirSync(migrationDir, { recursive: true })
+  }
+  return join(migrationDir, GLOBAL_SKILLS_MIGRATION_MARKER)
+}
+
+function parseUpdatedAtValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  return null
+}
+
+function resolveSkillUpdatedAt(skillDirPath: string): number {
+  const manifestPath = join(skillDirPath, 'manifest.json')
+  if (existsSync(manifestPath)) {
+    try {
+      const raw = readFileSync(manifestPath, 'utf-8')
+      const parsed = JSON.parse(raw) as { updatedAt?: unknown }
+      const manifestUpdatedAt = parseUpdatedAtValue(parsed.updatedAt)
+      if (manifestUpdatedAt !== null) {
+        return manifestUpdatedAt
+      }
+    } catch {
+      // ignore malformed manifest and continue fallback chain
+    }
+  }
+
+  const skillMdPath = join(skillDirPath, 'SKILL.md')
+  if (existsSync(skillMdPath)) {
+    return statSync(skillMdPath).mtimeMs
+  }
+
+  return statSync(skillDirPath).mtimeMs
+}
+
+function listSkillDirectories(skillsDir: string): Array<{ slug: string; path: string; updatedAt: number }> {
+  const skills: Array<{ slug: string; path: string; updatedAt: number }> = []
+  if (!existsSync(skillsDir)) return skills
+
+  const entries = readdirSync(skillsDir, { withFileTypes: true })
+  for (const entry of entries) {
+    try {
+      const skillPath = join(skillsDir, entry.name)
+      const isDir = entry.isDirectory() || (entry.isSymbolicLink() && statSync(skillPath).isDirectory())
+      if (!isDir) continue
+      skills.push({
+        slug: entry.name,
+        path: skillPath,
+        updatedAt: resolveSkillUpdatedAt(skillPath),
+      })
+    } catch {
+      // 单个目录异常不影响整体扫描
+    }
+  }
+
+  return skills
+}
+
 /**
- * 将默认 Skills 模板复制到工作区 skills/ 目录
+ * 将默认 Skills 模板复制到全局共享目录。
  *
- * 从 ~/.proma/default-skills/ 复制所有内容。
- * 如果模板目录不存在或为空则跳过。
+ * 仅复制缺失的 skill，不覆盖用户已存在内容。
  */
-function copyDefaultSkills(workspaceSlug: string): void {
+function copyDefaultSkillsToGlobal(): void {
   const defaultDir = getDefaultSkillsDir()
-  const targetDir = getWorkspaceSkillsDir(workspaceSlug)
+  const globalSkillsDir = getGlobalSkillsDir()
 
   try {
     const entries = readdirSync(defaultDir, { withFileTypes: true })
-    if (entries.length === 0) return
-
-    cpSync(defaultDir, targetDir, { recursive: true })
-    console.log(`[Agent 工作区] 已复制默认 Skills 到: ${workspaceSlug}`)
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const source = join(defaultDir, entry.name)
+      const target = join(globalSkillsDir, entry.name)
+      if (!existsSync(target)) {
+        cpSync(source, target, { recursive: true })
+      }
+    }
   } catch {
-    // 模板目录不存在或复制失败，跳过不影响工作区创建
+    // 模板目录不存在或复制失败，跳过不影响主流程
+  }
+}
+
+function upsertGlobalSkill(sourceSkillPath: string, skillSlug: string): void {
+  const globalSkillsDir = getGlobalSkillsDir()
+  const targetSkillPath = join(globalSkillsDir, skillSlug)
+
+  if (!existsSync(targetSkillPath)) {
+    cpSync(sourceSkillPath, targetSkillPath, { recursive: true })
+    return
+  }
+
+  const sourceUpdatedAt = resolveSkillUpdatedAt(sourceSkillPath)
+  const targetUpdatedAt = resolveSkillUpdatedAt(targetSkillPath)
+  if (sourceUpdatedAt > targetUpdatedAt) {
+    rmSync(targetSkillPath, { recursive: true, force: true })
+    cpSync(sourceSkillPath, targetSkillPath, { recursive: true })
+  }
+}
+
+/**
+ * 确保工作区 skills 入口链接到全局共享目录。
+ */
+export function ensureWorkspaceSkillsLink(workspaceSlug: string): void {
+  const workspacePath = getAgentWorkspacePath(workspaceSlug)
+  const workspaceSkillsPath = join(workspacePath, 'skills')
+  const globalSkillsDir = getGlobalSkillsDir()
+
+  if (existsSync(workspaceSkillsPath)) {
+    const currentStat = lstatSync(workspaceSkillsPath)
+    if (currentStat.isSymbolicLink()) {
+      const linkedTarget = readlinkSync(workspaceSkillsPath)
+      const resolvedLinkedTarget = resolve(workspacePath, linkedTarget)
+      if (resolvedLinkedTarget === resolve(globalSkillsDir)) {
+        return
+      }
+    }
+    if (currentStat.isDirectory()) {
+      const localSkills = listSkillDirectories(workspaceSkillsPath)
+      for (const skill of localSkills) {
+        upsertGlobalSkill(skill.path, skill.slug)
+      }
+    }
+    rmSync(workspaceSkillsPath, { recursive: true, force: true })
+  }
+
+  try {
+    symlinkSync(globalSkillsDir, workspaceSkillsPath, 'dir')
+  } catch (error) {
+    console.warn(`[Agent 工作区] 创建 skills 共享链接失败: ${workspaceSlug}`, error)
+    try {
+      mkdirSync(workspaceSkillsPath, { recursive: true })
+      cpSync(globalSkillsDir, workspaceSkillsPath, { recursive: true })
+    } catch (fallbackError) {
+      console.warn(`[Agent 工作区] skills 回退复制失败: ${workspaceSlug}`, fallbackError)
+    }
+  }
+}
+
+export function getSkillStorageInfo(): AgentSkillStorageInfo {
+  return {
+    mode: 'global-shared',
+    globalSkillsPath: getGlobalSkillsDir(),
+  }
+}
+
+/**
+ * 一次性迁移：将历史工作区 skills 合并到全局目录并建立链接。
+ */
+export function migrateWorkspaceSkillsToGlobalIfNeeded(): void {
+  const markerPath = getGlobalSkillsMigrationMarkerPath()
+  if (existsSync(markerPath)) return
+
+  try {
+    const workspaceSlugs = new Set<string>()
+    const index = readIndex()
+    for (const workspace of index.workspaces) {
+      workspaceSlugs.add(workspace.slug)
+    }
+
+    const workspacesRoot = getAgentWorkspacesDir()
+    const workspaceDirEntries = readdirSync(workspacesRoot, { withFileTypes: true })
+    for (const entry of workspaceDirEntries) {
+      if (entry.isDirectory()) {
+        workspaceSlugs.add(entry.name)
+      }
+    }
+
+    let hasWorkspaceError = false
+    for (const workspaceSlug of workspaceSlugs) {
+      try {
+        const workspaceSkillsPath = getWorkspaceSkillsDir(workspaceSlug)
+        const skillDirs = listSkillDirectories(workspaceSkillsPath)
+        for (const skill of skillDirs) {
+          upsertGlobalSkill(skill.path, skill.slug)
+        }
+        ensureWorkspaceSkillsLink(workspaceSlug)
+      } catch (error) {
+        hasWorkspaceError = true
+        console.warn(`[Agent 工作区] 迁移工作区 Skills 失败: ${workspaceSlug}`, error)
+      }
+    }
+
+    copyDefaultSkillsToGlobal()
+    if (!hasWorkspaceError) {
+      writeFileSync(markerPath, String(Date.now()), 'utf-8')
+      console.log('[Agent 工作区] 已完成 Skills 全局共享迁移')
+    } else {
+      console.warn('[Agent 工作区] Skills 迁移部分失败，下次启动将重试')
+    }
+  } catch (error) {
+    console.warn('[Agent 工作区] Skills 全局共享迁移失败，已跳过:', error)
   }
 }
 
@@ -193,8 +381,9 @@ export function createAgentWorkspace(name: string): AgentWorkspace {
   // 创建 SDK plugin manifest（SDK 需要此文件发现 skills）
   ensurePluginManifest(slug, name)
 
-  // 复制默认 Skills 模板
-  copyDefaultSkills(slug)
+  // 初始化全局 Skills 并建立工作区共享入口
+  copyDefaultSkillsToGlobal()
+  ensureWorkspaceSkillsLink(slug)
 
   index.workspaces.push(workspace)
   writeIndex(index)
@@ -284,16 +473,19 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
     // 创建 SDK plugin manifest
     ensurePluginManifest('default', '默认工作区')
 
-    // 复制默认 Skills 模板
-    copyDefaultSkills('default')
+    // 初始化全局 Skills 并建立工作区共享入口
+    copyDefaultSkillsToGlobal()
+    ensureWorkspaceSkillsLink('default')
 
     index.workspaces.push(defaultWs)
     writeIndex(index)
 
     console.log('[Agent 工作区] 已创建默认工作区')
   } else {
-    // 迁移兼容：确保已有默认工作区包含 plugin manifest 和 skills
+    // 迁移兼容：确保已有默认工作区包含 plugin manifest 和共享 skills 入口
     ensurePluginManifest(defaultWs.slug, defaultWs.name)
+    copyDefaultSkillsToGlobal()
+    ensureWorkspaceSkillsLink(defaultWs.slug)
   }
 
   return normalizeWorkspace(defaultWs)
@@ -367,12 +559,13 @@ export function saveWorkspaceMcpConfig(workspaceSlug: string, config: WorkspaceM
 // ===== Skill 目录扫描 =====
 
 /**
- * 扫描工作区 Skills 目录
+ * 扫描全局共享 Skills 目录
  *
- * 遍历 skills/{slug}/SKILL.md，解析 YAML frontmatter 提取元数据。
+ * 遍历 ~/.proma/skills/{slug}/SKILL.md，解析 YAML frontmatter 提取元数据。
  */
 export function getWorkspaceSkills(workspaceSlug: string): SkillMeta[] {
-  const skillsDir = getWorkspaceSkillsDir(workspaceSlug)
+  // workspaceSlug 参数保留兼容；Skills 统一从全局共享目录读取
+  const skillsDir = getGlobalSkillsDir()
   const skills: SkillMeta[] = []
 
   try {
@@ -448,10 +641,11 @@ export function getWorkspaceCapabilities(workspaceSlug: string): WorkspaceCapabi
 /**
  * 删除工作区 Skill
  *
- * 删除 skills/{slug}/ 整个目录。
+ * 删除全局 skills/{slug}/ 整个目录（workspaceSlug 仅用于兼容日志）。
  */
 export function deleteWorkspaceSkill(workspaceSlug: string, skillSlug: string): void {
-  const skillsDir = getWorkspaceSkillsDir(workspaceSlug)
+  // workspaceSlug 参数保留兼容；Skills 统一从全局共享目录删除
+  const skillsDir = getGlobalSkillsDir()
   const skillPath = join(skillsDir, skillSlug)
 
   if (!existsSync(skillPath)) {
@@ -459,7 +653,7 @@ export function deleteWorkspaceSkill(workspaceSlug: string, skillSlug: string): 
   }
 
   rmSync(skillPath, { recursive: true, force: true })
-  console.log(`[Agent 工作区] 已删除 Skill: ${workspaceSlug}/${skillSlug}`)
+  console.log(`[Agent 工作区] 已删除 Skill: ${workspaceSlug}/${skillSlug}（全局共享）`)
 }
 
 // ===== 权限模式管理 =====

@@ -41,6 +41,7 @@ import type {
   WorkspaceMcpConfig,
   SkillMeta,
   WorkspaceCapabilities,
+  AgentSkillStorageInfo,
   FileEntry,
   EnvironmentCheckResult,
   ProxyConfig,
@@ -111,10 +112,12 @@ import {
   updateAgentWorkspace,
   deleteAgentWorkspace,
   ensureDefaultWorkspace,
+  migrateWorkspaceSkillsToGlobalIfNeeded,
   getWorkspaceMcpConfig,
   saveWorkspaceMcpConfig,
   getWorkspaceSkills,
   getWorkspaceCapabilities,
+  getSkillStorageInfo,
   getAgentWorkspace,
   deleteWorkspaceSkill,
   getWorkspacePermissionMode,
@@ -573,6 +576,9 @@ export function registerIpcHandlers(): void {
 
   // ===== Agent 工作区管理相关 =====
 
+  // 迁移历史工作区 Skills 到全局共享目录（仅首次执行）
+  migrateWorkspaceSkillsToGlobalIfNeeded()
+
   // 确保默认工作区存在
   ensureDefaultWorkspace()
 
@@ -676,6 +682,14 @@ export function registerIpcHandlers(): void {
     AGENT_IPC_CHANNELS.DELETE_SKILL,
     async (_, workspaceSlug: string, skillSlug: string): Promise<void> => {
       return deleteWorkspaceSkill(workspaceSlug, skillSlug)
+    }
+  )
+
+  // 获取 Skill 存储信息
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_SKILL_STORAGE_INFO,
+    async (): Promise<AgentSkillStorageInfo> => {
+      return getSkillStorageInfo()
     }
   )
 
