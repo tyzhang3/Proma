@@ -176,6 +176,38 @@ export function WorkspaceSelector(): React.ReactElement {
     return ws.slug !== 'default' && workspaces.length > 1
   }
 
+  const handlePickWorkspaceDir = async (): Promise<void> => {
+    if (!currentWorkspaceId) return
+    try {
+      const path = await window.electronAPI.pickWorkspaceDirectory()
+      if (!path) return
+      const updated = await window.electronAPI.updateAgentWorkspace(currentWorkspaceId, { rootPath: path })
+      setWorkspaces((prev) => prev.map((w) => (w.id === updated.id ? updated : w)))
+    } catch (error) {
+      console.error('[WorkspaceSelector] 设置工作目录失败:', error)
+    }
+  }
+
+  const handleResetWorkspaceDir = async (): Promise<void> => {
+    if (!currentWorkspaceId) return
+    try {
+      const updated = await window.electronAPI.updateAgentWorkspace(currentWorkspaceId, { rootPath: '' })
+      setWorkspaces((prev) => prev.map((w) => (w.id === updated.id ? updated : w)))
+    } catch (error) {
+      console.error('[WorkspaceSelector] 重置工作目录失败:', error)
+    }
+  }
+
+  const handleChangeCwdMode = async (mode: 'workspace-root' | 'session-subdir'): Promise<void> => {
+    if (!currentWorkspaceId) return
+    try {
+      const updated = await window.electronAPI.updateAgentWorkspace(currentWorkspaceId, { cwdMode: mode })
+      setWorkspaces((prev) => prev.map((w) => (w.id === updated.id ? updated : w)))
+    } catch (error) {
+      console.error('[WorkspaceSelector] 更新 cwd 策略失败:', error)
+    }
+  }
+
   return (
     <>
       <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -286,6 +318,55 @@ export function WorkspaceSelector(): React.ReactElement {
               <Plus size={13} />
               <span>新建工作区</span>
             </div>
+          )}
+
+          {currentWorkspace && (
+            <>
+              <div className="my-1 border-t border-foreground/[0.06]" />
+              <div className="px-2 py-1 space-y-1.5 text-[12px] text-foreground/60">
+                <div className="truncate" title={currentWorkspace.rootPath || '默认目录'}>
+                  目录：{currentWorkspace.rootPath || '默认目录 (~/.proma/agent-workspaces/{slug}/{sessionId})'}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handlePickWorkspaceDir}
+                    className="px-2 py-1 rounded border border-foreground/[0.1] hover:bg-foreground/[0.04]"
+                  >
+                    选择目录
+                  </button>
+                  <button
+                    onClick={handleResetWorkspaceDir}
+                    className="px-2 py-1 rounded border border-foreground/[0.1] hover:bg-foreground/[0.04]"
+                  >
+                    恢复默认
+                  </button>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleChangeCwdMode('workspace-root')}
+                    className={cn(
+                      'px-2 py-1 rounded border',
+                      (currentWorkspace.cwdMode || 'workspace-root') === 'workspace-root'
+                        ? 'border-primary/50 bg-primary/10 text-foreground'
+                        : 'border-foreground/[0.1] hover:bg-foreground/[0.04]'
+                    )}
+                  >
+                    根目录
+                  </button>
+                  <button
+                    onClick={() => handleChangeCwdMode('session-subdir')}
+                    className={cn(
+                      'px-2 py-1 rounded border',
+                      currentWorkspace.cwdMode === 'session-subdir'
+                        ? 'border-primary/50 bg-primary/10 text-foreground'
+                        : 'border-foreground/[0.1] hover:bg-foreground/[0.04]'
+                    )}
+                  >
+                    会话子目录
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </DropdownMenuContent>
       </DropdownMenu>

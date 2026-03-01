@@ -28,6 +28,7 @@ import type {
   AgentMessage,
   AgentSendInput,
   AgentWorkspace,
+  AgentUpdateWorkspaceInput,
   AgentGenerateTitleInput,
   AgentSaveFilesInput,
   AgentSavedFile,
@@ -101,6 +102,7 @@ import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, copyF
 import { permissionService } from './lib/agent-permission-service'
 import { askUserService } from './lib/agent-ask-user-service'
 import { getAgentSessionWorkspacePath, getAgentWorkspacesDir } from './lib/config-paths'
+import { resolveAgentCwdByWorkspaceId } from './lib/agent-cwd-resolver'
 import {
   listAgentWorkspaces,
   createAgentWorkspace,
@@ -591,8 +593,24 @@ export function registerIpcHandlers(): void {
   // 更新 Agent 工作区
   ipcMain.handle(
     AGENT_IPC_CHANNELS.UPDATE_WORKSPACE,
-    async (_, id: string, updates: { name: string }): Promise<AgentWorkspace> => {
+    async (_, id: string, updates: AgentUpdateWorkspaceInput): Promise<AgentWorkspace> => {
       return updateAgentWorkspace(id, updates)
+    }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.PICK_WORKSPACE_DIR,
+    async (): Promise<string | null> => {
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      if (!win) return null
+
+      const result = await dialog.showOpenDialog(win, {
+        properties: ['openDirectory'],
+        title: '选择工作目录',
+      })
+
+      if (result.canceled || result.filePaths.length === 0) return null
+      return result.filePaths[0] || null
     }
   )
 
@@ -852,7 +870,7 @@ export function registerIpcHandlers(): void {
     async (_, workspaceId: string, sessionId: string): Promise<string | null> => {
       const ws = getAgentWorkspace(workspaceId)
       if (!ws) return null
-      return getAgentSessionWorkspacePath(ws.slug, sessionId)
+      return resolveAgentCwdByWorkspaceId(workspaceId, sessionId).cwd
     }
   )
 

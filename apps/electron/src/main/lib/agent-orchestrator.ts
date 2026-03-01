@@ -30,8 +30,9 @@ import { getAdapter, fetchTitle } from '@proma/core'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendAgentMessage, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages } from './agent-session-manager'
-import { getAgentWorkspace, getWorkspaceMcpConfig, ensurePluginManifest, getWorkspacePermissionMode } from './agent-workspace-manager'
-import { getAgentWorkspacePath, getAgentSessionWorkspacePath } from './config-paths'
+import { getWorkspaceMcpConfig, ensurePluginManifest, getWorkspacePermissionMode } from './agent-workspace-manager'
+import { getAgentWorkspacePath } from './config-paths'
+import { resolveAgentCwdByWorkspaceId } from './agent-cwd-resolver'
 import { getRuntimeStatus } from './runtime-init'
 import { buildSystemPromptAppend, buildDynamicContext } from './agent-prompt-builder'
 import { permissionService } from './agent-permission-service'
@@ -616,21 +617,20 @@ export class AgentOrchestrator {
       agentCwd = homedir()
       workspaceSlug = undefined
       workspace = undefined
-      if (workspaceId) {
-        const ws = getAgentWorkspace(workspaceId)
-        if (ws) {
-          agentCwd = getAgentSessionWorkspacePath(ws.slug, sessionId)
-          workspaceSlug = ws.slug
-          workspace = ws
-          console.log(`[Agent 编排] 使用 session 级别 cwd: ${agentCwd} (${ws.name}/${sessionId})`)
 
-          ensurePluginManifest(ws.slug, ws.name)
+      const resolvedCwd = resolveAgentCwdByWorkspaceId(workspaceId, sessionId)
+      agentCwd = resolvedCwd.cwd
+      workspaceSlug = resolvedCwd.workspaceSlug
+      workspace = resolvedCwd.workspace
 
-          if (existingSdkSessionId) {
-            console.log(`[Agent 编排] 将尝试 resume: ${existingSdkSessionId}`)
-          } else {
-            console.log(`[Agent 编排] 无 sdkSessionId，将作为新会话启动（回填历史上下文）`)
-          }
+      if (workspace) {
+        console.log(`[Agent 编排] 使用工作目录 cwd: ${agentCwd} (${workspace.name}/${sessionId})`)
+        ensurePluginManifest(workspace.slug, workspace.name)
+
+        if (existingSdkSessionId) {
+          console.log(`[Agent 编排] 将尝试 resume: ${existingSdkSessionId}`)
+        } else {
+          console.log(`[Agent 编排] 无 sdkSessionId，将作为新会话启动（回填历史上下文）`)
         }
       }
 

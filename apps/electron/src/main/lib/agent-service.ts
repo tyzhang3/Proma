@@ -27,6 +27,14 @@ import { ClaudeAgentAdapter } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { AgentOrchestrator } from './agent-orchestrator'
 import { getAgentSessionWorkspacePath } from './config-paths'
+import { resolveAgentCwdByWorkspaceId } from './agent-cwd-resolver'
+
+function resolveSessionDir(input: { workspaceId?: string; workspaceSlug: string; sessionId: string }): string {
+  if (input.workspaceId) {
+    return resolveAgentCwdByWorkspaceId(input.workspaceId, input.sessionId).cwd
+  }
+  return getAgentSessionWorkspacePath(input.workspaceSlug, input.sessionId)
+}
 
 // ===== 实例创建 =====
 
@@ -129,7 +137,7 @@ export function stopAllAgents(): void {
  * 将 base64 编码的文件写入 session 的 cwd，供 Agent 通过 Read 工具读取。
  */
 export function saveFilesToAgentSession(input: AgentSaveFilesInput): AgentSavedFile[] {
-  const sessionDir = getAgentSessionWorkspacePath(input.workspaceSlug, input.sessionId)
+  const sessionDir = resolveSessionDir(input)
   const results: AgentSavedFile[] = []
   const usedPaths = new Set<string>()
 
@@ -169,8 +177,8 @@ export function saveFilesToAgentSession(input: AgentSaveFilesInput): AgentSavedF
  * 使用异步 fs.cp 递归复制整个文件夹，返回所有复制的文件列表。
  */
 export async function copyFolderToSession(input: AgentCopyFolderInput): Promise<AgentSavedFile[]> {
-  const { sourcePath, workspaceSlug, sessionId } = input
-  const sessionDir = getAgentSessionWorkspacePath(workspaceSlug, sessionId)
+  const { sourcePath } = input
+  const sessionDir = resolveSessionDir(input)
 
   const folderName = sourcePath.split('/').filter(Boolean).pop() || 'folder'
   const targetDir = join(sessionDir, folderName)

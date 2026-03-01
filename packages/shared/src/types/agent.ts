@@ -33,6 +33,9 @@ export const MEMORY_IPC_CHANNELS = {
 // ===== Agent 工作区 =====
 
 /** Agent 工作区 */
+export type AgentWorkspaceCwdMode = 'workspace-root' | 'session-subdir'
+
+/** Agent 工作区 */
 export interface AgentWorkspace {
   /** 工作区唯一标识 */
   id: string
@@ -40,10 +43,21 @@ export interface AgentWorkspace {
   name: string
   /** URL-safe 目录名（创建后不可变） */
   slug: string
+  /** 可选：用户绑定的本地根目录（绝对路径） */
+  rootPath?: string
+  /** cwd 策略（未设置时默认 workspace-root） */
+  cwdMode?: AgentWorkspaceCwdMode
   /** 创建时间戳 */
   createdAt: number
   /** 更新时间戳 */
   updatedAt: number
+}
+
+/** 更新工作区输入 */
+export interface AgentUpdateWorkspaceInput {
+  name?: string
+  rootPath?: string
+  cwdMode?: AgentWorkspaceCwdMode
 }
 
 // ===== Agent 事件类型 =====
@@ -408,6 +422,7 @@ export interface AgentPendingFile {
 
 /** Agent 文件保存到 session 的输入 */
 export interface AgentSaveFilesInput {
+  workspaceId?: string
   workspaceSlug: string
   sessionId: string
   files: Array<{ filename: string; data: string }>
@@ -422,6 +437,7 @@ export interface AgentSavedFile {
 /** Agent 复制文件夹到 session 的输入 */
 export interface AgentCopyFolderInput {
   sourcePath: string
+  workspaceId?: string
   workspaceSlug: string
   sessionId: string
 }
@@ -532,6 +548,8 @@ export const AGENT_IPC_CHANNELS = {
   CREATE_WORKSPACE: 'agent:create-workspace',
   /** 更新工作区 */
   UPDATE_WORKSPACE: 'agent:update-workspace',
+  /** 选择工作区根目录 */
+  PICK_WORKSPACE_DIR: 'agent:pick-workspace-dir',
   /** 删除工作区 */
   DELETE_WORKSPACE: 'agent:delete-workspace',
 

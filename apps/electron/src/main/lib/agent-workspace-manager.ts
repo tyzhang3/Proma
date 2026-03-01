@@ -8,9 +8,9 @@
  * 照搬 agent-session-manager.ts 的 readIndex/writeIndex 模式。
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, cpSync, rmSync, mkdirSync, statSync, accessSync, constants } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import {
   getAgentWorkspacesIndexPath,
   getAgentWorkspacePath,
@@ -18,7 +18,15 @@ import {
   getWorkspaceSkillsDir,
   getDefaultSkillsDir,
 } from './config-paths'
-import type { AgentWorkspace, McpServerEntry, WorkspaceMcpConfig, SkillMeta, WorkspaceCapabilities, PromaPermissionMode } from '@proma/shared'
+import type {
+  AgentWorkspace,
+  AgentUpdateWorkspaceInput,
+  McpServerEntry,
+  WorkspaceMcpConfig,
+  SkillMeta,
+  WorkspaceCapabilities,
+  PromaPermissionMode,
+} from '@proma/shared'
 
 /**
  * 工作区索引文件格式
@@ -93,12 +101,42 @@ function slugify(name: string, existingSlugs: Set<string>): string {
   return slug
 }
 
+function normalizeWorkspace(workspace: AgentWorkspace): AgentWorkspace {
+  return {
+    ...workspace,
+    cwdMode: workspace.cwdMode || 'workspace-root',
+  }
+}
+
+function validateRootPath(rootPath: string): string {
+  const normalized = resolve(rootPath)
+  if (!isAbsolute(normalized)) {
+    throw new Error('工作目录必须为绝对路径')
+  }
+
+  if (!existsSync(normalized)) {
+    throw new Error('工作目录不存在，请重新选择')
+  }
+
+  const stat = statSync(normalized)
+  if (!stat.isDirectory()) {
+    throw new Error('工作目录必须是文件夹')
+  }
+
+  try {
+    accessSync(normalized, constants.R_OK | constants.W_OK)
+  } catch {
+    throw new Error('工作目录无读写权限，请选择其他目录')
+  }
+  return normalized
+}
+
 /**
  * 获取所有工作区（按 updatedAt 降序）
  */
 export function listAgentWorkspaces(): AgentWorkspace[] {
   const index = readIndex()
-  return index.workspaces.sort((a, b) => b.updatedAt - a.updatedAt)
+  return index.workspaces.map(normalizeWorkspace).sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 /**
@@ -106,7 +144,8 @@ export function listAgentWorkspaces(): AgentWorkspace[] {
  */
 export function getAgentWorkspace(id: string): AgentWorkspace | undefined {
   const index = readIndex()
-  return index.workspaces.find((w) => w.id === id)
+  const workspace = index.workspaces.find((w) => w.id === id)
+  return workspace ? normalizeWorkspace(workspace) : undefined
 }
 
 /**
@@ -143,6 +182,7 @@ export function createAgentWorkspace(name: string): AgentWorkspace {
     id: randomUUID(),
     name,
     slug,
+    cwdMode: 'workspace-root',
     createdAt: now,
     updatedAt: now,
   }
@@ -168,7 +208,7 @@ export function createAgentWorkspace(name: string): AgentWorkspace {
  */
 export function updateAgentWorkspace(
   id: string,
-  updates: { name: string },
+  updates: AgentUpdateWorkspaceInput,
 ): AgentWorkspace {
   const index = readIndex()
   const idx = index.workspaces.findIndex((w) => w.id === id)
@@ -178,11 +218,20 @@ export function updateAgentWorkspace(
   }
 
   const existing = index.workspaces[idx]!
-  const updated: AgentWorkspace = {
+  const nextName = updates.name?.trim()
+  const nextRootPath = updates.rootPath === undefined
+    ? existing.rootPath
+    : updates.rootPath === ''
+      ? undefined
+      : validateRootPath(updates.rootPath)
+
+  const updated: AgentWorkspace = normalizeWorkspace({
     ...existing,
-    name: updates.name,
+    ...(nextName ? { name: nextName } : {}),
+    rootPath: nextRootPath,
+    ...(updates.cwdMode ? { cwdMode: updates.cwdMode } : {}),
     updatedAt: Date.now(),
-  }
+  })
 
   index.workspaces[idx] = updated
   writeIndex(index)
@@ -224,6 +273,7 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
       id: randomUUID(),
       name: '默认工作区',
       slug: 'default',
+      cwdMode: 'workspace-root',
       createdAt: now,
       updatedAt: now,
     }
@@ -246,7 +296,7 @@ export function ensureDefaultWorkspace(): AgentWorkspace {
     ensurePluginManifest(defaultWs.slug, defaultWs.name)
   }
 
-  return defaultWs
+  return normalizeWorkspace(defaultWs)
 }
 
 // ===== Plugin Manifest（SDK 插件发现） =====

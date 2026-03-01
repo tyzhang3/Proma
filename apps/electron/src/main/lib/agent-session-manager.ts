@@ -10,12 +10,14 @@
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, unlinkSync, rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { join, resolve } from 'node:path'
 import {
   getAgentSessionsIndexPath,
   getAgentSessionsDir,
   getAgentSessionMessagesPath,
   getAgentSessionWorkspacePath,
 } from './config-paths'
+import { resolveAgentCwdByWorkspaceId } from './agent-cwd-resolver'
 import { getAgentWorkspace } from './agent-workspace-manager'
 import type { AgentSessionMeta, AgentMessage } from '@proma/shared'
 
@@ -107,12 +109,9 @@ export function createAgentSession(
   // 确保消息目录存在
   getAgentSessionsDir()
 
-  // 若有工作区，创建 session 级别子文件夹
+  // 若有工作区，提前解析并创建会话工作目录（按 cwdMode 决策）
   if (workspaceId) {
-    const ws = getAgentWorkspace(workspaceId)
-    if (ws) {
-      getAgentSessionWorkspacePath(ws.slug, meta.id)
-    }
+    resolveAgentCwdByWorkspaceId(workspaceId, meta.id)
   }
 
   console.log(`[Agent 会话] 已创建会话: ${meta.title} (${meta.id})`)
@@ -211,7 +210,10 @@ export function deleteAgentSession(id: string): void {
     const ws = getAgentWorkspace(removed.workspaceId)
     if (ws) {
       try {
-        const sessionDir = getAgentSessionWorkspacePath(ws.slug, id)
+        const sessionDir = ws.rootPath
+          ? (ws.cwdMode === 'session-subdir' ? join(resolve(ws.rootPath), id) : null)
+          : getAgentSessionWorkspacePath(ws.slug, id)
+        if (!sessionDir) return
         if (existsSync(sessionDir)) {
           rmSync(sessionDir, { recursive: true, force: true })
           console.log(`[Agent 会话] 已清理 session 工作目录: ${sessionDir}`)

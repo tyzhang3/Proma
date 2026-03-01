@@ -294,6 +294,7 @@ export function AgentView(): React.ReactElement {
 
       const saved = await window.electronAPI.copyFolderToSession({
         sourcePath: result.path,
+        workspaceId: workspace.id,
         workspaceSlug: workspace.slug,
         sessionId: currentSessionId,
       })
@@ -439,6 +440,7 @@ export function AgentView(): React.ReactElement {
         }))
         try {
           const saved = await window.electronAPI.saveFilesToAgentSession({
+            workspaceId: workspace.id,
             workspaceSlug: workspace.slug,
             sessionId: currentSessionId,
             files: filesToSave,
