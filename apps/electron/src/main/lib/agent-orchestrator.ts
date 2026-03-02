@@ -22,7 +22,7 @@ import { createRequire } from 'node:module'
 import { app } from 'electron'
 import type { AgentSendInput, AgentEvent, AgentMessage, AgentGenerateTitleInput, AgentProviderAdapter } from '@proma/shared'
 import { SAFE_TOOLS } from '@proma/shared'
-import type { PermissionRequest, PromaPermissionMode, AskUserRequest } from '@proma/shared'
+import type { PermissionRequest, PromaPermissionMode, AskUserRequest, WorkspacePermissionDefaults } from '@proma/shared'
 import type { ClaudeAgentQueryOptions } from './adapters/claude-agent-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { decryptApiKey, getChannelById, listChannels } from './channel-manager'
@@ -30,7 +30,7 @@ import { getAdapter, fetchTitle } from '@proma/core'
 import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendAgentMessage, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages } from './agent-session-manager'
-import { getWorkspaceMcpConfig, ensurePluginManifest, ensureWorkspaceSkillsLink, getWorkspacePermissionMode } from './agent-workspace-manager'
+import { getWorkspaceMcpConfig, ensurePluginManifest, ensureWorkspaceSkillsLink, getWorkspacePermissionMode, getWorkspacePermissionDefaults } from './agent-workspace-manager'
 import { getAgentWorkspacePath } from './config-paths'
 import { resolveAgentCwdByWorkspaceId } from './agent-cwd-resolver'
 import { getRuntimeStatus } from './runtime-init'
@@ -40,6 +40,7 @@ import { permissionService } from './agent-permission-service'
 import { askUserService } from './agent-ask-user-service'
 import { getMemoryConfig } from './memory-service'
 import { searchMemory, addMemory, formatSearchResult } from './memos-client'
+import { resolveWorkspaceForSession } from './agent-workspace-resolution'
 
 // ===== 类型定义 =====
 
@@ -569,6 +570,26 @@ export class AgentOrchestrator {
     // 4. 读取已有的 SDK session ID（用于 resume）
     const sessionMeta = getAgentSessionMeta(sessionId)
     const existingSdkSessionId = sessionMeta?.sdkSessionId
+    const workspaceResolution = resolveWorkspaceForSession(sessionMeta?.workspaceId, workspaceId)
+    let effectiveWorkspaceId = workspaceResolution.effectiveWorkspaceId
+
+    // 兼容历史会话：若会话尚未绑定 workspaceId，但本次请求携带了 workspaceId，则回填到会话元数据
+    if (workspaceResolution.shouldBackfillSessionWorkspace && workspaceId) {
+      try {
+        updateAgentSessionMeta(sessionId, { workspaceId })
+        effectiveWorkspaceId = workspaceId
+      } catch {
+        // 回填失败不影响主流程
+      }
+    }
+
+    // 会话与请求 workspace 不一致时，以会话绑定值为准，避免权限配置与 cwd 漂移
+    if (workspaceResolution.hasWorkspaceMismatch && sessionMeta?.workspaceId && workspaceId) {
+      console.warn(
+        `[Agent 编排] workspaceId 不一致，使用会话绑定值: session=${sessionId}, sessionWorkspace=${sessionMeta.workspaceId}, inputWorkspace=${workspaceId}`,
+      )
+      effectiveWorkspaceId = sessionMeta.workspaceId
+    }
     console.log(`[Agent 编排] 会话 resume 状态: sdkSessionId=${existingSdkSessionId || '无'}`)
 
     // 5. 持久化用户消息
@@ -627,7 +648,7 @@ export class AgentOrchestrator {
       workspaceSlug = undefined
       workspace = undefined
 
-      const resolvedCwd = resolveAgentCwdByWorkspaceId(workspaceId, sessionId)
+      const resolvedCwd = resolveAgentCwdByWorkspaceId(effectiveWorkspaceId, sessionId)
       agentCwd = resolvedCwd.cwd
       workspaceSlug = resolvedCwd.workspaceSlug
       workspace = resolvedCwd.workspace
@@ -673,12 +694,16 @@ export class AgentOrchestrator {
       const permissionMode: PromaPermissionMode = workspaceSlug
         ? getWorkspacePermissionMode(workspaceSlug)
         : 'smart'
-      console.log(`[Agent 编排] 权限模式: ${permissionMode}`)
+      const permissionDefaults: WorkspacePermissionDefaults = workspaceSlug
+        ? getWorkspacePermissionDefaults(workspaceSlug)
+        : { allowWrite: false, allowExecute: false }
+      console.log(`[Agent 编排] 权限模式: ${permissionMode}, 默认放行: write=${permissionDefaults.allowWrite}, execute=${permissionDefaults.allowExecute}`)
 
       const canUseTool = permissionMode !== 'auto'
         ? permissionService.createCanUseTool(
             sessionId,
             permissionMode,
+            permissionDefaults,
             (request: PermissionRequest) => {
               const event: AgentEvent = { type: 'permission_request', request }
               this.eventBus.emit(sessionId, event)

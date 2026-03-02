@@ -22,6 +22,7 @@ import { AgentHeader } from './AgentHeader'
 import { ContextUsageBadge } from './ContextUsageBadge'
 import { PermissionBanner } from './PermissionBanner'
 import { PermissionModeSelector } from './PermissionModeSelector'
+import { PermissionDefaultsSelector } from './PermissionDefaultsSelector'
 import { AskUserBanner } from './AskUserBanner'
 import { FileBrowser } from '@/components/file-browser'
 import { ModelSelector } from '@/components/chat/ModelSelector'
@@ -634,6 +635,7 @@ export function AgentView(): React.ReactElement {
       map.set(currentSessionId, {
         running: true,
         content: '',
+        requestId: queueId,
         toolActivities: [],
         model: agentModelId || undefined,
         startedAt: Date.now(),
@@ -733,6 +735,7 @@ export function AgentView(): React.ReactElement {
   /** 手动发送 /compact 命令 */
   const handleCompact = React.useCallback((): void => {
     if (!currentSessionId || !agentChannelId || streaming) return
+    const compactRequestId = `agent-compact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
     // 初始化流式状态
     setStreamingStates((prev) => {
@@ -740,15 +743,22 @@ export function AgentView(): React.ReactElement {
       const current = prev.get(currentSessionId) ?? {
         running: true,
         content: '',
+        requestId: compactRequestId,
         toolActivities: [],
         model: agentModelId || undefined,
         startedAt: Date.now(),
       }
-      map.set(currentSessionId, { ...current, running: true, startedAt: current.startedAt ?? Date.now() })
+      map.set(currentSessionId, {
+        ...current,
+        running: true,
+        requestId: compactRequestId,
+        startedAt: current.startedAt ?? Date.now(),
+      })
       return map
     })
 
     window.electronAPI.sendAgentMessage({
+      requestId: compactRequestId,
       sessionId: currentSessionId,
       userMessage: '/compact',
       channelId: agentChannelId,
@@ -1024,6 +1034,7 @@ export function AgentView(): React.ReactElement {
                       </TooltipContent>
                     </Tooltip>
                     <PermissionModeSelector />
+                    <PermissionDefaultsSelector />
                     <ModelSelector
                       filterChannelId={agentChannelId}
                       externalSelectedModel={externalSelectedModel}

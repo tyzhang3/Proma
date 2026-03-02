@@ -61,6 +61,7 @@ import type {
   PermissionRequest,
   PermissionResponse,
   PromaPermissionMode,
+  WorkspacePermissionDefaults,
   AskUserRequest,
   AskUserResponse,
   SystemPromptConfig,
@@ -341,6 +342,12 @@ export interface ElectronAPI {
 
   /** 设置工作区权限模式 */
   setPermissionMode: (workspaceSlug: string, mode: PromaPermissionMode) => Promise<void>
+
+  /** 获取工作区默认放行配置 */
+  getPermissionDefaults: (workspaceSlug: string) => Promise<WorkspacePermissionDefaults>
+
+  /** 设置工作区默认放行配置 */
+  setPermissionDefaults: (workspaceSlug: string, defaults: WorkspacePermissionDefaults) => Promise<void>
 
   /** 获取全局记忆配置 */
   getMemoryConfig: () => Promise<MemoryConfig>
@@ -804,6 +811,14 @@ const electronAPI: ElectronAPI = {
 
   setPermissionMode: (workspaceSlug: string, mode: PromaPermissionMode) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_PERMISSION_MODE, workspaceSlug, mode)
+  },
+
+  getPermissionDefaults: (workspaceSlug: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GET_PERMISSION_DEFAULTS, workspaceSlug)
+  },
+
+  setPermissionDefaults: (workspaceSlug: string, defaults: WorkspacePermissionDefaults) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_PERMISSION_DEFAULTS, workspaceSlug, defaults)
   },
 
   getMemoryConfig: () => {

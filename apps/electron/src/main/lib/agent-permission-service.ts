@@ -16,6 +16,7 @@ import type {
   PermissionRequest,
   DangerLevel,
   AskUserRequest,
+  WorkspacePermissionDefaults,
 } from '@proma/shared'
 import {
   SAFE_TOOLS,
@@ -55,6 +56,10 @@ interface SessionWhitelist {
   allowedTools: Set<string>
   /** 总是允许的 Bash 基础命令（如 'git push', 'npm install'） */
   allowedBashCommands: Set<string>
+  /** 总是允许的 Bash 精确命令（用于包含 && / ; 等结构的命令） */
+  allowedBashExactCommands: Set<string>
+  /** Bash 是否在当前会话中完全放行 */
+  allowAllBash: boolean
 }
 
 /**
@@ -77,6 +82,7 @@ export class AgentPermissionService {
   createCanUseTool(
     sessionId: string,
     mode: PromaPermissionMode,
+    permissionDefaults: WorkspacePermissionDefaults,
     sendToRenderer: (request: PermissionRequest) => void,
     askUserHandler?: (sessionId: string, input: Record<string, unknown>, signal: AbortSignal, sendToRenderer: (request: AskUserRequest) => void) => Promise<PermissionResult>,
     sendAskUserToRenderer?: (request: AskUserRequest) => void,
@@ -95,6 +101,7 @@ export class AgentPermissionService {
       // 智能模式：只读工具自动允许
       if (mode === 'smart') {
         if (this.isReadOnlyTool(toolName, input)) return allow()
+        if (this.isAllowedByDefaults(toolName, permissionDefaults)) return allow()
         if (this.isWhitelisted(sessionId, toolName, input)) return allow()
       }
 
@@ -185,6 +192,30 @@ export class AgentPermissionService {
   }
 
   /**
+   * 判断工具是否可被工作区默认放行配置自动允许（仅 smart 模式使用）
+   */
+  private isAllowedByDefaults(toolName: string, defaults: WorkspacePermissionDefaults): boolean {
+    if (defaults.allowWrite && this.isWriteTool(toolName)) return true
+    if (defaults.allowExecute && this.isExecuteTool(toolName)) return true
+    return false
+  }
+
+  /**
+   * 判断是否为写入类工具
+   */
+  private isWriteTool(toolName: string): boolean {
+    return toolName === 'Write' || toolName === 'Edit' || toolName === 'NotebookEdit'
+  }
+
+  /**
+   * 判断是否为执行类工具
+   */
+  private isExecuteTool(toolName: string): boolean {
+    if (toolName === 'Bash' || toolName === 'Task') return true
+    return toolName.startsWith('mcp__')
+  }
+
+  /**
    * 判断工具/命令是否在会话白名单中
    */
   private isWhitelisted(sessionId: string, toolName: string, input: Record<string, unknown>): boolean {
@@ -197,10 +228,19 @@ export class AgentPermissionService {
     }
 
     // Bash 工具：即使基础命令在白名单中，也要重新检查完整命令的安全性
+    if (whitelist.allowAllBash) return true
+
     const command = typeof input.command === 'string' ? input.command : ''
-    if (hasDangerousStructure(command)) return false
-    if (isDangerousCommand(command)) return false
-    const baseCommand = this.extractBaseCommand(command)
+    const normalizedCommand = this.normalizeCommand(command)
+    if (!normalizedCommand) return false
+
+    // 精确命令白名单（用于用户已明确放行的复杂命令）
+    if (whitelist.allowedBashExactCommands.has(normalizedCommand)) return true
+
+    // 基础命令白名单仅用于普通单命令，避免过度放大权限
+    if (hasDangerousStructure(normalizedCommand)) return false
+    if (isDangerousCommand(normalizedCommand)) return false
+    const baseCommand = this.extractBaseCommand(normalizedCommand)
     return whitelist.allowedBashCommands.has(baseCommand)
   }
 
@@ -213,11 +253,7 @@ export class AgentPermissionService {
     if (toolName !== 'Bash') {
       whitelist.allowedTools.add(toolName)
     } else {
-      const command = typeof input.command === 'string' ? input.command : ''
-      const baseCommand = this.extractBaseCommand(command)
-      if (baseCommand) {
-        whitelist.allowedBashCommands.add(baseCommand)
-      }
+      whitelist.allowAllBash = true
     }
   }
 
@@ -231,9 +267,18 @@ export class AgentPermissionService {
     const whitelist: SessionWhitelist = {
       allowedTools: new Set(),
       allowedBashCommands: new Set(),
+      allowedBashExactCommands: new Set(),
+      allowAllBash: false,
     }
     this.sessionWhitelists.set(sessionId, whitelist)
     return whitelist
+  }
+
+  /**
+   * 规范化命令字符串（用于白名单匹配）
+   */
+  private normalizeCommand(command: string): string {
+    return command.trim()
   }
 
   /**

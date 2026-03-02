@@ -155,15 +155,17 @@ export function useGlobalAgentListeners(): void {
           enabled
         )
 
-        /** 竞态保护：检查该会话是否已有新的流式请求正在运行 */
-        const isNewStreamRunning = (): boolean => {
+        /** 竞态保护：仅在“不同 requestId 的新流”运行时跳过完成落盘 */
+        const isDifferentStreamRunning = (): boolean => {
           const state = store.get(agentStreamingStatesAtom).get(data.sessionId)
-          return state?.running === true
+          if (!state?.running) return false
+          if (!state.requestId || !data.requestId) return false
+          return state.requestId !== data.requestId
         }
 
         const finalize = (): void => {
           // 竞态保护：新流已启动时不要清理状态
-          if (isNewStreamRunning()) return
+          if (isDifferentStreamRunning()) return
 
           // 移除流式状态
           store.set(agentStreamingStatesAtom, (prev) => {
@@ -188,7 +190,7 @@ export function useGlobalAgentListeners(): void {
         if (data.sessionId === currentId) {
           if (data.messages) {
             // 同步路径：直接使用 payload 中已持久化的消息，消除异步 IPC 竞态窗口
-            if (!isNewStreamRunning()) {
+            if (!isDifferentStreamRunning()) {
               store.set(currentAgentMessagesAtom, data.messages)
             }
             finalize()
@@ -197,7 +199,7 @@ export function useGlobalAgentListeners(): void {
             window.electronAPI
               .getAgentSessionMessages(data.sessionId)
               .then((messages) => {
-                if (isNewStreamRunning()) return
+                if (isDifferentStreamRunning()) return
                 store.set(currentAgentMessagesAtom, messages)
                 finalize()
               })

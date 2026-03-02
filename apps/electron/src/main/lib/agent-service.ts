@@ -168,6 +168,7 @@ export async function runAgent(
         if (!webContents.isDestroyed()) {
           webContents.send(AGENT_IPC_CHANNELS.STREAM_COMPLETE, {
             sessionId: input.sessionId,
+            requestId: input.requestId,
             messages,
           })
         }

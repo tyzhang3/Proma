@@ -30,6 +30,7 @@ import type {
   SkillMeta,
   WorkspaceCapabilities,
   PromaPermissionMode,
+  WorkspacePermissionDefaults,
 } from '@proma/shared'
 
 /**
@@ -661,6 +662,12 @@ export function deleteWorkspaceSkill(workspaceSlug: string, skillSlug: string): 
 /** 工作区配置文件格式 */
 interface WorkspaceConfig {
   permissionMode?: PromaPermissionMode
+  permissionDefaults?: Partial<WorkspacePermissionDefaults>
+}
+
+const DEFAULT_WORKSPACE_PERMISSION_DEFAULTS: WorkspacePermissionDefaults = {
+  allowWrite: false,
+  allowExecute: false,
 }
 
 /**
@@ -707,6 +714,19 @@ export function getWorkspacePermissionMode(workspaceSlug: string): PromaPermissi
 }
 
 /**
+ * 获取工作区默认放行配置
+ *
+ * 默认返回 { allowWrite: false, allowExecute: false }。
+ */
+export function getWorkspacePermissionDefaults(workspaceSlug: string): WorkspacePermissionDefaults {
+  const config = readWorkspaceConfig(workspaceSlug)
+  return {
+    allowWrite: config.permissionDefaults?.allowWrite ?? DEFAULT_WORKSPACE_PERMISSION_DEFAULTS.allowWrite,
+    allowExecute: config.permissionDefaults?.allowExecute ?? DEFAULT_WORKSPACE_PERMISSION_DEFAULTS.allowExecute,
+  }
+}
+
+/**
  * 设置工作区权限模式
  */
 export function setWorkspacePermissionMode(workspaceSlug: string, mode: PromaPermissionMode): void {
@@ -714,4 +734,21 @@ export function setWorkspacePermissionMode(workspaceSlug: string, mode: PromaPer
   const updated: WorkspaceConfig = { ...config, permissionMode: mode }
   writeWorkspaceConfig(workspaceSlug, updated)
   console.log(`[Agent 工作区] 权限模式已更新: ${workspaceSlug} → ${mode}`)
+}
+
+/**
+ * 设置工作区默认放行配置
+ */
+export function setWorkspacePermissionDefaults(workspaceSlug: string, defaults: WorkspacePermissionDefaults): void {
+  const config = readWorkspaceConfig(workspaceSlug)
+  const updated: WorkspaceConfig = {
+    ...config,
+    permissionDefaults: {
+      ...config.permissionDefaults,
+      allowWrite: defaults.allowWrite,
+      allowExecute: defaults.allowExecute,
+    },
+  }
+  writeWorkspaceConfig(workspaceSlug, updated)
+  console.log(`[Agent 工作区] 默认放行配置已更新: ${workspaceSlug} → write=${defaults.allowWrite}, execute=${defaults.allowExecute}`)
 }

@@ -14,21 +14,13 @@ import { Shield, ShieldAlert, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { pendingPermissionRequestsAtom } from '@/atoms/agent-atoms'
 import type { DangerLevel } from '@proma/shared'
+import { buildPermissionResponse, formatPermissionToolName } from './permission-banner-utils'
 
 /** 危险等级对应的图标颜色 */
 const DANGER_ICON_STYLES: Record<DangerLevel, string> = {
   safe: 'text-green-500',
   normal: 'text-primary',
   dangerous: 'text-amber-500',
-}
-
-/** 解析工具显示名称（MCP 工具显示 server / tool） */
-function formatToolName(toolName: string): string {
-  const parts = toolName.split('__')
-  if (parts[0] === 'mcp' && parts.length >= 3) {
-    return `${parts[1]} / ${parts.slice(2).join('__')}`
-  }
-  return toolName
 }
 
 export function PermissionBanner(): React.ReactElement | null {
@@ -64,11 +56,7 @@ export function PermissionBanner(): React.ReactElement | null {
     setResponding(true)
 
     try {
-      await window.electronAPI.respondPermission({
-        requestId: request.requestId,
-        behavior,
-        alwaysAllow,
-      })
+      await window.electronAPI.respondPermission(buildPermissionResponse(request.requestId, behavior, alwaysAllow))
       // 移除已响应的请求（FIFO 出队）
       setRequests((prev) => prev.filter((r) => r.requestId !== request.requestId))
     } catch (error) {
@@ -98,7 +86,7 @@ export function PermissionBanner(): React.ReactElement | null {
           )}
         </div>
         <span className="text-xs text-muted-foreground font-mono">
-          {formatToolName(request.toolName)}
+          {formatPermissionToolName(request.toolName)}
         </span>
       </div>
 

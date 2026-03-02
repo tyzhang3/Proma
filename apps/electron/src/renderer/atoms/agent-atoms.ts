@@ -7,7 +7,7 @@
 
 import { atom } from 'jotai'
 import { atomFamily } from 'jotai/utils'
-import type { AgentSessionMeta, AgentMessage, AgentEvent, AgentWorkspace, AgentPendingFile, AgentSavedFile, AgentSendInput, ErrorCode, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest } from '@proma/shared'
+import type { AgentSessionMeta, AgentMessage, AgentEvent, AgentWorkspace, AgentPendingFile, AgentSavedFile, AgentSendInput, ErrorCode, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, WorkspacePermissionDefaults } from '@proma/shared'
 
 /** 活动状态 */
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
@@ -39,6 +39,8 @@ export interface ActivityGroup {
 export interface AgentStreamState {
   running: boolean
   content: string
+  /** 当前流式请求幂等键（用于完成事件竞态消歧） */
+  requestId?: string
   toolActivities: ToolActivity[]
   model?: string
   /** 当前输入 token 数（上下文使用量） */
@@ -179,6 +181,12 @@ export const workspaceFilesVersionAtom = atom(0)
 
 /** 当前工作区权限模式 */
 export const agentPermissionModeAtom = atom<PromaPermissionMode>('smart')
+
+/** 当前工作区默认放行配置 */
+export const agentPermissionDefaultsAtom = atom<WorkspacePermissionDefaults>({
+  allowWrite: false,
+  allowExecute: false,
+})
 
 /** 待处理的权限请求 Map — 以 sessionId 为 key，切换会话时保留状态 */
 export const allPendingPermissionRequestsAtom = atom<Map<string, readonly PermissionRequest[]>>(new Map())

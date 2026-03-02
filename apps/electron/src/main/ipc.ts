@@ -51,6 +51,7 @@ import type {
   GitHubReleaseListOptions,
   PermissionResponse,
   PromaPermissionMode,
+  WorkspacePermissionDefaults,
   AskUserResponse,
   SystemPromptConfig,
   SystemPrompt,
@@ -108,6 +109,7 @@ import {
 } from './lib/agent-session-manager'
 import { runAgent, stopAgent, generateAgentTitle, saveFilesToAgentSession, copyFolderToSession, snapshotSessionFiles } from './lib/agent-service'
 import { permissionService } from './lib/agent-permission-service'
+import { handlePermissionResponse } from './lib/agent-permission-ipc'
 import { askUserService } from './lib/agent-ask-user-service'
 import { getAgentSessionWorkspacePath, getAgentWorkspacesDir } from './lib/config-paths'
 import { resolveAgentCwdByWorkspaceId } from './lib/agent-cwd-resolver'
@@ -127,6 +129,8 @@ import {
   deleteWorkspaceSkill,
   getWorkspacePermissionMode,
   setWorkspacePermissionMode,
+  getWorkspacePermissionDefaults,
+  setWorkspacePermissionDefaults,
 } from './lib/agent-workspace-manager'
 import { getMemoryConfig, setMemoryConfig } from './lib/memory-service'
 import {
@@ -747,16 +751,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     AGENT_IPC_CHANNELS.PERMISSION_RESPOND,
     async (event, response: PermissionResponse): Promise<void> => {
-      const { requestId, behavior, alwaysAllow } = response
-      const sessionId = permissionService.respondToPermission(requestId, behavior, alwaysAllow)
-
-      // 发送 permission_resolved 事件给渲染进程
-      if (sessionId) {
-        event.sender.send(AGENT_IPC_CHANNELS.STREAM_EVENT, {
-          sessionId,
-          event: { type: 'permission_resolved', requestId, behavior },
-        })
-      }
+      handlePermissionResponse(permissionService, event.sender, response)
     }
   )
 
@@ -794,6 +789,25 @@ export function registerIpcHandlers(): void {
         throw new Error(`无效的权限模式: ${mode}`)
       }
       setWorkspacePermissionMode(workspaceSlug, mode)
+    }
+  )
+
+  // 获取工作区默认放行配置
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.GET_PERMISSION_DEFAULTS,
+    async (_, workspaceSlug: string): Promise<WorkspacePermissionDefaults> => {
+      return getWorkspacePermissionDefaults(workspaceSlug)
+    }
+  )
+
+  // 设置工作区默认放行配置
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.SET_PERMISSION_DEFAULTS,
+    async (_, workspaceSlug: string, defaults: WorkspacePermissionDefaults): Promise<void> => {
+      if (!defaults || typeof defaults.allowWrite !== 'boolean' || typeof defaults.allowExecute !== 'boolean') {
+        throw new Error('无效的默认放行配置')
+      }
+      setWorkspacePermissionDefaults(workspaceSlug, defaults)
     }
   )
 

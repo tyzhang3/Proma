@@ -35,7 +35,7 @@ const MODE_CONFIG: Record<PromaPermissionMode, {
   supervised: {
     icon: Eye,
     label: '监督',
-    description: '所有操作都需要确认',
+    description: '只读自动允许，其余操作都需要确认',
     className: 'text-amber-500 hover:text-amber-400',
   },
 }

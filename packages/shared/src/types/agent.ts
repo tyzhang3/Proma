@@ -405,6 +405,8 @@ export interface AgentStreamEvent {
  */
 export interface AgentStreamCompletePayload {
   sessionId: string
+  /** 请求幂等键（用于与当前流式状态匹配） */
+  requestId?: string
   /** 已持久化的完整消息列表 */
   messages?: AgentMessage[]
 }
@@ -551,6 +553,14 @@ export type PromaPermissionMode = 'auto' | 'smart' | 'supervised'
 /** 权限模式定义顺序（用于循环切换） */
 export const PROMA_PERMISSION_MODE_ORDER: readonly PromaPermissionMode[] = ['auto', 'smart', 'supervised']
 
+/** 工作区默认放行配置 */
+export interface WorkspacePermissionDefaults {
+  /** smart 模式下默认允许写入类工具 */
+  allowWrite: boolean
+  /** smart 模式下默认允许执行类工具 */
+  allowExecute: boolean
+}
+
 /** 危险等级 */
 export type DangerLevel = 'safe' | 'normal' | 'dangerous'
 
@@ -693,6 +703,10 @@ export const AGENT_IPC_CHANNELS = {
   SET_PERMISSION_MODE: 'agent:set-permission-mode',
   /** 获取权限模式（渲染进程 → 主进程） */
   GET_PERMISSION_MODE: 'agent:get-permission-mode',
+  /** 获取工作区默认放行配置（渲染进程 → 主进程） */
+  GET_PERMISSION_DEFAULTS: 'agent:get-permission-defaults',
+  /** 设置工作区默认放行配置（渲染进程 → 主进程） */
+  SET_PERMISSION_DEFAULTS: 'agent:set-permission-defaults',
 
   // AskUserQuestion 交互式问答
   /** AskUser 响应（渲染进程 → 主进程） */
