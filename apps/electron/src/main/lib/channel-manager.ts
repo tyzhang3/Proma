@@ -586,11 +586,11 @@ async function fetchGoogleModels(baseUrl: string, apiKey: string, proxyUrl?: str
   const items = data.models ?? []
 
   // 过滤出支持 generateContent 的模型（排除纯 embedding 模型）
-  const chatModels = items.filter((item) =>
+  const generativeModels = items.filter((item) =>
     item.supportedGenerationMethods?.includes('generateContent')
   )
 
-  const models: ChannelModel[] = chatModels.map((item) => {
+  const models: ChannelModel[] = generativeModels.map((item) => {
     // Google 模型 name 格式为 "models/gemini-pro"，提取实际 ID
     const id = item.name.replace(/^models\//, '')
     return {

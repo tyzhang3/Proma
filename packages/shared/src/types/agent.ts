@@ -217,6 +217,8 @@ export interface AgentSessionMeta {
   title: string
   /** 使用的渠道 ID */
   channelId?: string
+  /** 使用的模型 ID */
+  modelId?: string
   /** SDK 内部会话 ID（用于 resume 衔接上下文） */
   sdkSessionId?: string
   /** 所属工作区 ID */
@@ -474,13 +476,16 @@ export interface AgentSaveFilesInput {
   workspaceId?: string
   workspaceSlug: string
   sessionId: string
-  files: Array<{ filename: string; data: string }>
+  files: Array<{ filename: string; data: string; mediaType: string }>
 }
 
 /** Agent 已保存文件信息 */
 export interface AgentSavedFile {
   filename: string
   targetPath: string
+  mediaType: string
+  size: number
+  data?: string
 }
 
 /** Agent 复制文件夹到 session 的输入 */
@@ -607,6 +612,8 @@ export const AGENT_IPC_CHANNELS = {
   GET_MESSAGES: 'agent:get-messages',
   /** 更新会话标题 */
   UPDATE_TITLE: 'agent:update-title',
+  /** 更新会话模型 */
+  UPDATE_MODEL: 'agent:update-model',
   /** 删除会话 */
   DELETE_SESSION: 'agent:delete-session',
 

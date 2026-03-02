@@ -2,7 +2,7 @@
  * Active View Atom - 主内容区视图状态
  *
  * 控制 MainContentPanel 显示的内容：
- * - conversations: 对话视图（Chat/Agent 模式内容）
+ * - conversations: 对话视图（Agent 模式内容）
  * - settings: 设置面板
  */
 

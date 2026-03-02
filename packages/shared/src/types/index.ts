@@ -18,8 +18,8 @@ export * from './channel'
 // 代理配置相关类型
 export * from './proxy'
 
-// Chat 相关类型
-export * from './chat'
+// 通用文件相关类型
+export * from './file'
 
 // Agent 相关类型
 export * from './agent'

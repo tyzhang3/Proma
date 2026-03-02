@@ -25,8 +25,8 @@ import { PermissionModeSelector } from './PermissionModeSelector'
 import { PermissionDefaultsSelector } from './PermissionDefaultsSelector'
 import { AskUserBanner } from './AskUserBanner'
 import { FileBrowser } from '@/components/file-browser'
-import { ModelSelector } from '@/components/chat/ModelSelector'
-import { AttachmentPreviewItem } from '@/components/chat/AttachmentPreviewItem'
+import { ModelSelector } from '@/components/common/model-selector'
+import { AttachmentPreviewItem } from '@/components/common/attachment-preview-item'
 import { RichTextInput } from '@/components/ai-elements/rich-text-input'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -249,7 +249,7 @@ export function AgentView(): React.ReactElement {
         if (!window.__pendingAgentFileData) {
           window.__pendingAgentFileData = new Map<string, string>()
         }
-        window.__pendingAgentFileData.set(pending.id, fileInfo.data)
+        window.__pendingAgentFileData.set(pending.id, fileInfo.data || '')
 
         setPendingFiles((prev) => [...prev, pending])
       }
@@ -561,6 +561,7 @@ export function AgentView(): React.ReactElement {
           return {
             filename: `.proma-queue/${queueId}/uploads/${uniqueName}`,
             data: window.__pendingAgentFileData?.get(file.id) || '',
+            mediaType: file.mediaType,
           }
         })
         const savedUploads = await window.electronAPI.saveFilesToAgentSession({

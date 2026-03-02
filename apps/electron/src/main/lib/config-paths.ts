@@ -37,42 +37,6 @@ export function getChannelsPath(): string {
   return join(getConfigDir(), 'channels.json')
 }
 
-/**
- * 获取对话索引文件路径
- *
- * @returns ~/.proma/conversations.json
- */
-export function getConversationsIndexPath(): string {
-  return join(getConfigDir(), 'conversations.json')
-}
-
-/**
- * 获取对话消息目录路径
- *
- * 如果目录不存在则自动创建。
- *
- * @returns ~/.proma/conversations/
- */
-export function getConversationsDir(): string {
-  const dir = join(getConfigDir(), 'conversations')
-
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true })
-    console.log(`[配置] 已创建对话目录: ${dir}`)
-  }
-
-  return dir
-}
-
-/**
- * 获取指定对话的消息文件路径
- *
- * @param id 对话 ID
- * @returns ~/.proma/conversations/{id}.jsonl
- */
-export function getConversationMessagesPath(id: string): string {
-  return join(getConversationsDir(), `${id}.jsonl`)
-}
 
 /**
  * 获取附件存储根目录

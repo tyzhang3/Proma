@@ -8,20 +8,17 @@
 
 import * as React from 'react'
 import { useAtomValue } from 'jotai'
-import { appModeAtom } from '@/atoms/app-mode'
 import { activeViewAtom } from '@/atoms/active-view'
 import { Panel } from './Panel'
-import { ChatView } from '@/components/chat'
 import { AgentView } from '@/components/agent'
 import { SettingsPanel } from '@/components/settings'
 
 export function MainContentPanel(): React.ReactElement {
-  const mode = useAtomValue(appModeAtom)
   const activeView = useAtomValue(activeViewAtom)
 
   /** 渲染对话视图内容 */
   const renderConversations = (): React.ReactElement => {
-    return mode === 'chat' ? <ChatView /> : <AgentView />
+    return <AgentView />
   }
 
   return (

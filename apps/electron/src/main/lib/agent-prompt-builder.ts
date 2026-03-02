@@ -11,6 +11,7 @@
 import { getUserProfile } from './user-profile-service'
 import { getWorkspaceMcpConfig, getWorkspaceSkills } from './agent-workspace-manager'
 import { getMemoryConfig } from './memory-service'
+import { getSystemPromptConfig } from './system-prompt-manager'
 
 // ===== 静态 System Prompt =====
 
@@ -30,6 +31,7 @@ interface SystemPromptContext {
 export function buildSystemPromptAppend(ctx: SystemPromptContext): string {
   const profile = getUserProfile()
   const userName = profile.userName || '用户'
+  const appendDateTimeAndUserName = getSystemPromptConfig().appendDateTimeAndUserName
 
   const sections: string[] = []
 
@@ -48,10 +50,12 @@ export function buildSystemPromptAppend(ctx: SystemPromptContext): string {
 调用 Skill 工具时，\`skill\` 参数**必须**使用含命名空间前缀的完整名称（如 \`proma-workspace-${ctx.workspaceSlug}:brainstorming\`）。
 **绝对不可**使用不带前缀的短名称（如 \`brainstorming\`），否则会报 Unknown skill 错误。`)
 
-  // 用户信息
-  sections.push(`## 用户信息
+  // 用户信息（可由设置项关闭）
+  if (appendDateTimeAndUserName) {
+    sections.push(`## 用户信息
 
 - 用户名: ${userName}`)
+  }
 
   // 工作区信息
   if (ctx.workspaceName && ctx.workspaceSlug) {
@@ -125,19 +129,24 @@ interface DynamicContext {
  */
 export function buildDynamicContext(ctx: DynamicContext): string {
   const sections: string[] = []
+  const appendDateTimeAndUserName = getSystemPromptConfig().appendDateTimeAndUserName
 
-  // 当前时间
-  const now = new Date()
-  const timeStr = now.toLocaleString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZoneName: 'short',
-  })
-  sections.push(`**当前时间: ${timeStr}**`)
+  if (appendDateTimeAndUserName) {
+    const profile = getUserProfile()
+    const userName = profile.userName || '用户'
+    const now = new Date()
+    const timeStr = now.toLocaleString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    })
+    sections.push(`**当前时间: ${timeStr}**`)
+    sections.push(`**用户名: ${userName}**`)
+  }
 
   // 工作区实时状态
   if (ctx.workspaceSlug) {

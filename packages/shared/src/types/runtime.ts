@@ -194,6 +194,10 @@ export const IPC_CHANNELS = {
   GET_GIT_REPO_STATUS: 'git:get-repo-status',
   /** 在系统默认浏览器中打开外部链接 */
   OPEN_EXTERNAL: 'shell:open-external',
+  /** 打开文件选择对话框 */
+  OPEN_FILE_DIALOG: 'file:open-dialog',
+  /** 读取附件为 base64 */
+  READ_ATTACHMENT: 'file:read-attachment',
 } as const
 
 /**

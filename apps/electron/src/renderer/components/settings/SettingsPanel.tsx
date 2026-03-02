@@ -13,7 +13,6 @@ import { Settings, Radio, Palette, Info, Plug, Globe, BookOpen, Brain } from 'lu
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { settingsTabAtom } from '@/atoms/settings-tab'
 import type { SettingsTab } from '@/atoms/settings-tab'
-import { appModeAtom } from '@/atoms/app-mode'
 import { hasUpdateAtom } from '@/atoms/updater'
 import { hasEnvironmentIssuesAtom } from '@/atoms/environment'
 import { ChannelSettings } from './ChannelSettings'
@@ -74,17 +73,13 @@ function renderTabContent(tab: SettingsTab): React.ReactElement {
 
 export function SettingsPanel(): React.ReactElement {
   const [activeTab, setActiveTab] = useAtom(settingsTabAtom)
-  const appMode = useAtomValue(appModeAtom)
   const hasUpdate = useAtomValue(hasUpdateAtom)
   const hasEnvironmentIssues = useAtomValue(hasEnvironmentIssuesAtom)
 
   // Agent 模式时在渠道后插入 Agent Tab，记忆 tab 两种模式都显示
   const tabs = React.useMemo(() => {
-    if (appMode === 'agent') {
-      return [...BASE_TABS, AGENT_TAB, MEMORY_TAB, ...TAIL_TABS]
-    }
-    return [...BASE_TABS, MEMORY_TAB, ...TAIL_TABS]
-  }, [appMode])
+    return [...BASE_TABS, AGENT_TAB, MEMORY_TAB, ...TAIL_TABS]
+  }, [])
 
   return (
     <div className="flex h-full">

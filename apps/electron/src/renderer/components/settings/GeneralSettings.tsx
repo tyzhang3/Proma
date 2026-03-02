@@ -17,7 +17,7 @@ import {
   SettingsToggle,
 } from './primitives'
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover'
-import { UserAvatar } from '../chat/UserAvatar'
+import { UserAvatar } from '../common/user-avatar'
 import { userProfileAtom } from '@/atoms/user-profile'
 import {
   notificationsEnabledAtom,

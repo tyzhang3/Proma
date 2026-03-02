@@ -7,7 +7,6 @@ import { createTray, destroyTray } from './tray'
 import { initializeRuntime } from './lib/runtime-init'
 import { seedDefaultSkills } from './lib/config-paths'
 import { stopAllAgents } from './lib/agent-service'
-import { stopAllGenerations } from './lib/chat-service'
 import { initAutoUpdater, cleanupUpdater } from './lib/updater/auto-updater'
 import { startWorkspaceWatcher, stopWorkspaceWatcher } from './lib/workspace-watcher'
 import { getIsQuitting, setQuitting, isUpdating } from './lib/app-lifecycle'
@@ -216,9 +215,8 @@ app.on('before-quit', () => {
     return
   }
 
-  // 中止所有活跃的 Agent 和 Chat 子进程
+  // 中止所有活跃的 Agent 子进程
   stopAllAgents()
-  stopAllGenerations()
   // 清理更新器定时器
   cleanupUpdater()
   // 停止工作区文件监听

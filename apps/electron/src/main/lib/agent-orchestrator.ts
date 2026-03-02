@@ -701,19 +701,19 @@ export class AgentOrchestrator {
 
       const canUseTool = permissionMode !== 'auto'
         ? permissionService.createCanUseTool(
-            sessionId,
-            permissionMode,
-            permissionDefaults,
-            (request: PermissionRequest) => {
-              const event: AgentEvent = { type: 'permission_request', request }
-              this.eventBus.emit(sessionId, event)
-            },
-            (sid, toolInput, signal, sendAskUser) => askUserService.handleAskUserQuestion(sid, toolInput, signal, sendAskUser),
-            (request: AskUserRequest) => {
-              const event: AgentEvent = { type: 'ask_user_request', request }
-              this.eventBus.emit(sessionId, event)
-            },
-          )
+          sessionId,
+          permissionMode,
+          permissionDefaults,
+          (request: PermissionRequest) => {
+            const event: AgentEvent = { type: 'permission_request', request }
+            this.eventBus.emit(sessionId, event)
+          },
+          (sid, toolInput, signal, sendAskUser) => askUserService.handleAskUserQuestion(sid, toolInput, signal, sendAskUser),
+          (request: AskUserRequest) => {
+            const event: AgentEvent = { type: 'ask_user_request', request }
+            this.eventBus.emit(sessionId, event)
+          },
+        )
         : undefined
 
       // 13. 构建最终 system prompt append（内置 + Agent 自定义）
@@ -846,6 +846,7 @@ export class AgentOrchestrator {
       if (!this.activeSessions.has(sessionId)) {
         console.log(`[Agent 编排] 会话 ${sessionId} 已被用户中止`)
         this.persistAssistantMessage(sessionId, accumulatedText, accumulatedEvents, resolvedModel)
+        try { updateAgentSessionMeta(sessionId, { updatedAt: Date.now() }) } catch { /* 忽略 */ }
         const abortFinalMessages = getAgentSessionMessages(sessionId)
         callbacks.onComplete(abortFinalMessages)
         return
@@ -887,7 +888,8 @@ export class AgentOrchestrator {
           errorOriginal: error instanceof Error ? error.stack : String(error),
         }
         appendAgentMessage(sessionId, errorMsg)
-        console.log(`[Agent 编排] 已保存错误消息到 JSONL`)
+        updateAgentSessionMeta(sessionId, { updatedAt: Date.now() })
+        console.log(`[Agent 编排] 已保存错误消息并更新元数据`)
       } catch (saveError) {
         console.error('[Agent 编排] 保存错误消息失败:', saveError)
       }

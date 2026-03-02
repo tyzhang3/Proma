@@ -24,6 +24,7 @@ import type {
   AgentSnapshotSessionFilesInput,
   AgentStreamEvent,
   AgentStreamErrorPayload,
+  AgentSessionMeta,
   ErrorCode,
 } from '@proma/shared'
 import { ClaudeAgentAdapter } from './adapters/claude-agent-adapter'
@@ -214,6 +215,24 @@ export function stopAgent(sessionId: string): void {
   orchestrator.stop(sessionId)
 }
 
+import {
+  listAgentSessions,
+  createAgentSession,
+  getAgentSessionMessages,
+  getAgentSessionMeta,
+  updateAgentSessionMeta,
+} from './agent-session-manager'
+
+/** 更新 Agent 会话标题 */
+export async function updateAgentSessionTitle(id: string, title: string): Promise<AgentSessionMeta> {
+  return updateAgentSessionMeta(id, { title })
+}
+
+/** 更新 Agent 会话使用的模型和渠道 */
+export async function updateAgentSessionModel(id: string, channelId: string, modelId: string): Promise<AgentSessionMeta> {
+  return updateAgentSessionMeta(id, { channelId, modelId })
+}
+
 /** 中止所有活跃的 Agent 会话（应用退出时调用） */
 export function stopAllAgents(): void {
   orchestrator.stopAll()
@@ -254,7 +273,12 @@ export function saveFilesToAgentSession(input: AgentSaveFilesInput): AgentSavedF
     writeFileSync(targetPath, buffer)
 
     const actualFilename = targetPath.slice(sessionDir.length + 1)
-    results.push({ filename: actualFilename, targetPath })
+    results.push({
+      filename: actualFilename,
+      targetPath,
+      mediaType: file.mediaType || 'application/octet-stream',
+      size: Buffer.from(file.data, 'base64').length,
+    })
     console.log(`[Agent 服务] 文件已保存: ${targetPath} (${buffer.length} bytes)`)
   }
 
@@ -285,7 +309,12 @@ export async function copyFolderToSession(input: AgentCopyFolderInput): Promise<
         await collectFiles(fullPath, relativeTo)
       } else {
         const relPath = fullPath.slice(relativeTo.length + 1)
-        results.push({ filename: relPath, targetPath: fullPath })
+        results.push({
+          filename: relPath,
+          targetPath: fullPath,
+          mediaType: 'application/octet-stream', // TODO: 探测
+          size: statSync(fullPath).size
+        })
       }
     }
   }
@@ -358,7 +387,12 @@ export function snapshotSessionFiles(input: AgentSnapshotSessionFilesInput): Age
     copyFileSync(sourcePath, safeTargetPath)
 
     const actualFilename = safeTargetPath.slice(sessionDir.length + 1)
-    results.push({ filename: actualFilename, targetPath: safeTargetPath })
+    results.push({
+      filename: actualFilename,
+      targetPath: safeTargetPath,
+      mediaType: 'application/octet-stream', // TODO: 探测
+      size: statSync(safeTargetPath).size
+    })
   }
 
   return results

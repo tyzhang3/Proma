@@ -10,6 +10,7 @@
 
 import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
+import { activeViewAtom } from '@/atoms/active-view'
 import { Plus, Plug, Pencil, Trash2, Sparkles, FolderOpen, MessageSquare, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -23,8 +24,6 @@ import {
   agentPendingPromptAtom,
   workspaceCapabilitiesVersionAtom,
 } from '@/atoms/agent-atoms'
-import { activeViewAtom } from '@/atoms/active-view'
-import { appModeAtom } from '@/atoms/app-mode'
 import type { AgentSkillStorageInfo, McpServerEntry, SkillMeta, WorkspaceMcpConfig } from '@proma/shared'
 import { SettingsSection, SettingsCard, SettingsRow } from './primitives'
 import { McpServerForm } from './McpServerForm'
@@ -48,7 +47,6 @@ export function AgentSettings(): React.ReactElement {
   const setCurrentSessionId = useSetAtom(currentAgentSessionIdAtom)
   const setPendingPrompt = useSetAtom(agentPendingPromptAtom)
   const setActiveView = useSetAtom(activeViewAtom)
-  const setAppMode = useSetAtom(appModeAtom)
   const bumpCapabilitiesVersion = useSetAtom(workspaceCapabilitiesVersionAtom)
 
   // 派生当前工作区 slug
@@ -208,7 +206,6 @@ ${skillList}
       setPendingPrompt({ sessionId: session.id, message: promptMessage })
 
       // 跳转到 Agent 对话视图
-      setAppMode('agent')
       setActiveView('conversations')
     } catch (error) {
       console.error('[Agent 设置] 创建配置会话失败:', error)

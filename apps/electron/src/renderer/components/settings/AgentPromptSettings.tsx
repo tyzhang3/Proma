@@ -192,7 +192,7 @@ export function AgentPromptSettings(): React.ReactElement {
   return (
     <div className="space-y-6">
       <SettingsSection
-        title="系统提示词（Agent）"
+        title="系统提示词"
         description="管理 Agent 模式的系统提示词"
         action={
           <Button size="sm" onClick={handleCreate}>
@@ -221,7 +221,7 @@ export function AgentPromptSettings(): React.ReactElement {
       </SettingsSection>
 
       {selectedPrompt && (
-        <SettingsSection title="提示词内容（Agent）">
+        <SettingsSection title="提示词内容">
           <SettingsCard divided={false} className="p-4 space-y-3">
             <div>
               <label className="text-sm font-medium text-foreground mb-1.5 block">名称</label>
@@ -294,35 +294,31 @@ function AgentPromptListItem({
         )}
       </div>
 
-      {!prompt.isBuiltin && (
-        <>
-          {!isDefault && isHovered && (
-            <button
-              type="button"
-              className="p-1 rounded hover:bg-muted transition-colors"
-              onClick={(e) => {
-                e.stopPropagation()
-                void onSetDefault(prompt.id)
-              }}
-              title="设为默认"
-            >
-              <Star className="size-3.5 text-muted-foreground" />
-            </button>
-          )}
-          {isHovered && (
-            <button
-              type="button"
-              className="p-1 rounded hover:bg-destructive/10 transition-colors"
-              onClick={(e) => {
-                e.stopPropagation()
-                void onDelete(prompt.id)
-              }}
-              title="删除"
-            >
-              <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
-            </button>
-          )}
-        </>
+      {!isDefault && isHovered && (
+        <button
+          type="button"
+          className="p-1 rounded hover:bg-muted transition-colors"
+          onClick={(e) => {
+            e.stopPropagation()
+            void onSetDefault(prompt.id)
+          }}
+          title="设为默认"
+        >
+          <Star className="size-3.5 text-muted-foreground" />
+        </button>
+      )}
+      {!prompt.isBuiltin && isHovered && (
+        <button
+          type="button"
+          className="p-1 rounded hover:bg-destructive/10 transition-colors"
+          onClick={(e) => {
+            e.stopPropagation()
+            void onDelete(prompt.id)
+          }}
+          title="删除"
+        >
+          <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
+        </button>
       )}
     </div>
   )

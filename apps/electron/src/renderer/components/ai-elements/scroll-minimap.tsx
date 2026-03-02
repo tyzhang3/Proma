@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
-import { UserAvatar } from '@/components/chat/UserAvatar'
+import { UserAvatar } from '@/components/common/user-avatar'
 import { getModelLogo } from '@/lib/model-logo'
 import { cn } from '@/lib/utils'
 

@@ -226,7 +226,7 @@ function main(): void {
   step++
   printStepStart(step, totalSteps, 'Electron Builder 打包')
 
-  const builderArgs = ['electron-builder', `--${opts.platform}`]
+  const builderArgs = ['electron-builder', `--${opts.platform}`, '--publish', 'never']
 
   // 只构建当前架构
   if (opts.currentArch) {
