@@ -18,6 +18,8 @@ import {
   SettingsCard,
   SettingsToggle,
 } from './primitives'
+import { appModeAtom } from '@/atoms/app-mode'
+import { AgentPromptSettings } from './AgentPromptSettings'
 import {
   promptConfigAtom,
   selectedPromptIdAtom,
@@ -29,6 +31,7 @@ import type { SystemPrompt, SystemPromptCreateInput, SystemPromptUpdateInput } f
 const DEBOUNCE_DELAY = 500
 
 export function PromptSettings(): React.ReactElement {
+  const appMode = useAtomValue(appModeAtom)
   const [config, setConfig] = useAtom(promptConfigAtom)
   const [selectedId, setSelectedId] = useAtom(selectedPromptIdAtom)
   const defaultPromptId = useAtomValue(defaultPromptIdAtom)
@@ -234,6 +237,8 @@ export function PromptSettings(): React.ReactElement {
           />
         </SettingsCard>
       </SettingsSection>
+
+      {appMode === 'agent' && <AgentPromptSettings />}
     </div>
   )
 }
