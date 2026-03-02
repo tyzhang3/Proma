@@ -325,7 +325,7 @@ export const UserMessageContent = React.memo(
             className={cn(
               'flex items-center gap-1 text-xs text-foreground/40 hover:text-foreground/70 transition-colors mt-1',
               !isExpanded &&
-                'absolute bottom-0 left-0 right-0 pt-4 bg-gradient-to-t from-foreground/[0.045] dark:from-foreground/[0.08] to-transparent'
+              'absolute bottom-0 left-0 right-0 pt-4 bg-gradient-to-t from-foreground/[0.045] dark:from-foreground/[0.08] to-transparent'
             )}
           >
             {isExpanded ? (
@@ -349,14 +349,18 @@ export const UserMessageContent = React.memo(
 
 // ===== MessageLoading 加载动画 =====
 
-type MessageLoadingProps = HTMLAttributes<HTMLDivElement> & { startedAt?: number }
+type MessageLoadingProps = HTMLAttributes<HTMLDivElement> & {
+  startedAt?: number
+  /** SDK 系统状态消息 */
+  statusMessage?: string
+}
 
 /** 等待首个 chunk 的加载动画 */
-export function MessageLoading({ className, startedAt, ...props }: MessageLoadingProps): React.ReactElement {
+export function MessageLoading({ className, startedAt, statusMessage, ...props }: MessageLoadingProps): React.ReactElement {
   return (
     <div className={cn('mt-0', className)} {...props}>
       <LoadingIndicator
-        label="正在思考..."
+        label={statusMessage || '正在思考...'}
         size="sm"
         showElapsed={startedAt || true}
         className="text-muted-foreground/60"

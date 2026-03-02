@@ -51,15 +51,15 @@ export interface AgentStreamState {
   startedAt?: number
   /** 重试状态（扩展版） */
   retrying?: {
-    /** 当前第几次尝试 */
     currentAttempt: number
-    /** 最大尝试次数 */
     maxAttempts: number
-    /** 重试历史记录（按时间顺序） */
     history: RetryAttempt[]
-    /** 是否已失败 */
     failed: boolean
   }
+  /** 思考状态：记录 text_complete (isIntermediate=true) 的内容 */
+  intermediateTexts?: string[]
+  /** SDK 系统状态消息（初始化进度等），用于思考阶段展示 */
+  statusMessage?: string
 }
 
 /** 从 ToolActivity 派生状态 */
@@ -263,6 +263,18 @@ export const agentStreamingModelAtom = atom<string | undefined>((get) => {
   return get(agentStreamingStatesAtom).get(currentId)?.model
 })
 
+export const agentIntermediateTextsAtom = atom<string[]>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return []
+  return get(agentStreamingStatesAtom).get(currentId)?.intermediateTexts ?? []
+})
+
+export const agentStatusMessageAtom = atom<string | undefined>((get) => {
+  const currentId = get(currentAgentSessionIdAtom)
+  if (!currentId) return undefined
+  return get(agentStreamingStatesAtom).get(currentId)?.statusMessage
+})
+
 export const agentRetryingAtom = atom<AgentStreamState['retrying'] | undefined>((get) => {
   const currentId = get(currentAgentSessionIdAtom)
   if (!currentId) return undefined
@@ -293,10 +305,21 @@ export function applyAgentEvent(
 ): AgentStreamState {
   switch (event.type) {
     case 'text_delta':
-      // 开始接收文本 - 清除重试状态（重试成功）
-      return { ...prev, content: prev.content + event.text, retrying: undefined }
+      // 开始接收文本 - 清除重试状态（重试成功）和状态消息
+      return { ...prev, content: prev.content + event.text, retrying: undefined, statusMessage: undefined }
+
+    case 'system_status':
+      return { ...prev, statusMessage: event.message }
 
     case 'text_complete':
+      // 如果是中间思考逻辑
+      if (event.isIntermediate) {
+        return {
+          ...prev,
+          content: '', // 清空当前文本累积，转存到思考列表
+          intermediateTexts: [...(prev.intermediateTexts ?? []), event.text],
+        }
+      }
       // 用完整文本替换增量累积的文本（用于回放场景：只需 text_complete 即可重建文本状态）
       return { ...prev, content: event.text }
 
@@ -310,8 +333,9 @@ export function applyAgentEvent(
               ? { ...t, input: event.input, intent: event.intent || t.intent, displayName: event.displayName || t.displayName }
               : t
           ),
-          // 开始工具调用 - 清除重试状态（重试成功）
+          // 开始工具调用 - 清除重试状态（重试成功）和状态消息
           retrying: undefined,
+          statusMessage: undefined,
         }
       }
       return {
@@ -325,8 +349,9 @@ export function applyAgentEvent(
           done: false,
           parentToolUseId: event.parentToolUseId,
         }],
-        // 开始工具调用 - 清除重试状态（重试成功）
+        // 开始工具调用 - 清除重试状态（重试成功）和状态消息
         retrying: undefined,
+        statusMessage: undefined,
       }
     }
 

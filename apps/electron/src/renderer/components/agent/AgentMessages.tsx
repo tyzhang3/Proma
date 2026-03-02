@@ -30,8 +30,9 @@ import { UserAvatar } from '@/components/chat/UserAvatar'
 import { CopyButton } from '@/components/chat/CopyButton'
 import { formatMessageTime } from '@/components/chat/ChatMessageItem'
 import { getModelLogo } from '@/lib/model-logo'
-import { ToolActivityList } from './ToolActivityItem'
+import { ToolActivityList, IntermediateRow } from './ToolActivityItem'
 import { BackgroundTasksPanel } from './BackgroundTasksPanel'
+import { FileChangeSummary } from './FileChangeSummary'
 import { useBackgroundTasks } from '@/hooks/useBackgroundTasks'
 import {
   currentAgentMessagesAtom,
@@ -42,6 +43,8 @@ import {
   agentStreamingModelAtom,
   agentRetryingAtom,
   agentStartedAtAtom,
+  agentIntermediateTextsAtom,
+  agentStatusMessageAtom,
 } from '@/atoms/agent-atoms'
 import { userProfileAtom } from '@/atoms/user-profile'
 import { cn } from '@/lib/utils'
@@ -424,6 +427,7 @@ function AgentMessageItem({ message }: { message: AgentMessage }): React.ReactEl
           {toolActivities.length > 0 && (
             <div className="mb-3">
               <ToolActivityList activities={toolActivities} />
+              <FileChangeSummary activities={toolActivities} />
             </div>
           )}
           {message.content && (
@@ -479,6 +483,8 @@ export function AgentMessages(): React.ReactElement {
   const agentStreamingModel = useAtomValue(agentStreamingModelAtom)
   const retrying = useAtomValue(agentRetryingAtom)
   const startedAt = useAtomValue(agentStartedAtAtom)
+  const intermediateTexts = useAtomValue(agentIntermediateTextsAtom)
+  const statusMessage = useAtomValue(agentStatusMessageAtom)
 
   // 获取后台任务列表
   const { tasks: backgroundTasks } = useBackgroundTasks(currentSessionId || '')
@@ -522,9 +528,20 @@ export function AgentMessages(): React.ReactElement {
                 />
                 <MessageContent>
                   {retrying && <RetryingNotice retrying={retrying} />}
+
+                  {/* 中间思考过程展示 */}
+                  {intermediateTexts.length > 0 && (
+                    <div className="mb-2 opacity-80">
+                      {intermediateTexts.map((text, i) => (
+                        <IntermediateRow key={i} text={text} index={i} animate />
+                      ))}
+                    </div>
+                  )}
+
                   {toolActivities.length > 0 && (
                     <div className="mb-3">
                       <ToolActivityList activities={toolActivities} animate />
+                      <FileChangeSummary activities={toolActivities} />
                       {/* 后台任务面板 — 显示在工具活动下方 */}
                       <BackgroundTasksPanel tasks={backgroundTasks} />
                     </div>
@@ -535,7 +552,7 @@ export function AgentMessages(): React.ReactElement {
                       {streaming && <StreamingIndicator />}
                     </>
                   ) : (
-                    streaming && toolActivities.length === 0 && !retrying && <MessageLoading startedAt={startedAt} />
+                    streaming && toolActivities.length === 0 && !retrying && <MessageLoading startedAt={startedAt} statusMessage={statusMessage} />
                   )}
                 </MessageContent>
               </Message>

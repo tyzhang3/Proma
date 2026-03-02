@@ -129,7 +129,8 @@ interface DiffStats {
   deletions: number
 }
 
-function computeDiffStats(toolName: string, input: Record<string, unknown>): DiffStats | null {
+/** 计算 diff 统计（共享函数，也被 FileChangeSummary 使用） */
+export function computeDiffStats(toolName: string, input: Record<string, unknown>): DiffStats | null {
   if (toolName === 'Edit') {
     const oldStr = typeof input.old_string === 'string' ? input.old_string : ''
     const newStr = typeof input.new_string === 'string' ? input.new_string : ''
@@ -138,16 +139,29 @@ function computeDiffStats(toolName: string, input: Record<string, unknown>): Dif
     const newLines = newStr.split('\n').length
     return { additions: Math.max(0, newLines - oldLines + 1), deletions: Math.max(0, oldLines - newLines + 1) }
   }
+  if (toolName === 'Write') {
+    const content = typeof input.content === 'string' ? input.content : ''
+    if (!content) return null
+    const lines = content.split('\n').length
+    return { additions: lines, deletions: 0 }
+  }
   return null
 }
 
 // ===== Badge 组件 =====
 
 function FileBadge({ path }: { path: string }): React.ReactElement {
-  const filename = path.split('/').pop() ?? path
+  const parts = path.split('/')
+  const filename = parts.pop() ?? path
+  const parent = parts.pop()
+  const display = parent ? `${parent}/${filename}` : filename
+
   return (
-    <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-background shadow-sm text-foreground/70 leading-none">
-      {filename}
+    <span
+      className="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-background shadow-sm text-foreground/70 leading-none cursor-help"
+      title={path}
+    >
+      {display}
     </span>
   )
 }
@@ -195,7 +209,7 @@ function extractFilePath(input: Record<string, unknown>): string | null {
 
 // ===== 格式化输入摘要（单行） =====
 
-function getInputSummary(toolName: string, input: Record<string, unknown>): string | null {
+export function getInputSummary(toolName: string, input: Record<string, unknown>, result?: string): string | null {
   if (toolName === 'Bash') {
     const cmd = input.command
     if (typeof cmd === 'string') return cmd.length > 80 ? cmd.slice(0, 80) + '…' : cmd
@@ -216,6 +230,16 @@ function getInputSummary(toolName: string, input: Record<string, unknown>): stri
     const skill = input.skill
     if (typeof skill === 'string') return skill
   }
+
+  // 仅对有意义的工具显示结果首行摘要
+  const RESULT_SUMMARY_TOOLS = new Set(['Bash', 'Read', 'Grep', 'Glob'])
+  if (RESULT_SUMMARY_TOOLS.has(toolName) && result && result.length > 0) {
+    const firstLine = result.split('\n')[0]?.trim()
+    if (firstLine) {
+      return firstLine.length > 60 ? firstLine.slice(0, 60) + '…' : firstLine
+    }
+  }
+
   return null
 }
 
@@ -285,7 +309,7 @@ function ActivityRow({ activity, index = 0, animate = false, onOpenDetails }: Ac
   const status = getActivityStatus(activity)
   const filePath = extractFilePath(activity.input)
   const diffStats = computeDiffStats(activity.toolName, activity.input)
-  const inputSummary = getInputSummary(activity.toolName, activity.input)
+  const inputSummary = getInputSummary(activity.toolName, activity.input, activity.result)
   const intent = activity.intent ?? activity.displayName
 
   const delay = animate && index < SIZE.staggerLimit ? `${index * 30}ms` : '0ms'
@@ -295,49 +319,58 @@ function ActivityRow({ activity, index = 0, animate = false, onOpenDetails }: Ac
   return (
     <div
       className={cn(
-        'group/row flex items-center gap-1.5 text-[12px] rounded-md',
+        'group/row flex flex-col gap-0.5 rounded-md',
         SIZE.row,
         animate && 'animate-in fade-in slide-in-from-left-2 duration-200 fill-mode-both',
       )}
       style={animate ? { animationDelay: delay } : undefined}
     >
-      {canExpand ? (
-        <button
-          type="button"
-          className="group/expand shrink-0 flex items-center gap-2 cursor-pointer"
-          onClick={(e) => { e.stopPropagation(); onOpenDetails(activity) }}
-        >
-          <span className={cn(SIZE.icon, 'relative flex items-center justify-center')}>
-            <span className="transition-opacity duration-150 group-hover/expand:opacity-0">
-              <StatusIcon status={status} toolName={activity.toolName} />
+      <div className="flex items-center gap-1.5">
+        {canExpand ? (
+          <button
+            type="button"
+            className="group/expand shrink-0 flex items-center gap-2 cursor-pointer"
+            onClick={(e) => { e.stopPropagation(); onOpenDetails(activity) }}
+          >
+            <span className={cn(SIZE.icon, 'relative flex items-center justify-center')}>
+              <span className="transition-opacity duration-150 group-hover/expand:opacity-0">
+                <StatusIcon status={status} toolName={activity.toolName} />
+              </span>
+              <Plus className={cn(SIZE.icon, 'absolute text-foreground/60 opacity-0 transition-opacity duration-150 group-hover/expand:opacity-100')} />
             </span>
-            <Plus className={cn(SIZE.icon, 'absolute text-foreground/60 opacity-0 transition-opacity duration-150 group-hover/expand:opacity-100')} />
-          </span>
-          <span className="shrink-0 text-foreground/80 group-hover/expand:text-foreground transition-colors duration-150">{activity.toolName}</span>
-        </button>
-      ) : (
-        <>
-          <StatusIcon status={status} toolName={activity.toolName} />
-          <span className="shrink-0 text-foreground/80">{activity.toolName}</span>
-        </>
-      )}
+            <span className="shrink-0 text-foreground/80 group-hover/expand:text-foreground transition-colors duration-150">{activity.toolName}</span>
+          </button>
+        ) : (
+          <>
+            <StatusIcon status={status} toolName={activity.toolName} />
+            <span className="shrink-0 text-foreground/80">{activity.toolName}</span>
+          </>
+        )}
 
-      {diffStats && <DiffBadges stats={diffStats} />}
+        {diffStats && <DiffBadges stats={diffStats} />}
 
-      {filePath && <FileBadge path={filePath} />}
+        {filePath && <FileBadge path={filePath} />}
 
-      {activity.isError && <ErrorBadge />}
+        {activity.isError && <ErrorBadge />}
 
-      <span className="truncate flex-1 min-w-0 text-foreground/50">
-        {intent && <>{intent}</>}
-        {!intent && inputSummary && <>{inputSummary}</>}
-        {intent && inputSummary && <> · <span className="opacity-70">{inputSummary}</span></>}
-      </span>
-
-      {activity.elapsedSeconds !== undefined && activity.elapsedSeconds > 0 && (
-        <span className="shrink-0 text-[11px] text-muted-foreground/60 tabular-nums">
-          {formatElapsed(activity.elapsedSeconds)}
+        <span className="truncate flex-1 min-w-0 text-foreground/50">
+          {intent && <>{intent}</>}
+          {!intent && inputSummary && <>{inputSummary}</>}
+          {intent && inputSummary && <> · <span className="opacity-70">{inputSummary}</span></>}
         </span>
+
+        {activity.elapsedSeconds !== undefined && activity.elapsedSeconds > 0 && (
+          <span className="shrink-0 text-[11px] text-muted-foreground/60 tabular-nums">
+            {formatElapsed(activity.elapsedSeconds)}
+          </span>
+        )}
+      </div>
+
+      {/* 路径辅助行：仅在流式执行时显示，历史消息不占空间 */}
+      {animate && filePath && (status === 'running' || status === 'completed') && (
+        <div className="pl-4 text-[10px] text-muted-foreground/40 font-mono truncate">
+          {filePath}
+        </div>
       )}
     </div>
   )
@@ -443,7 +476,7 @@ function ActivityGroupRow({ group, index = 0, animate = false, onOpenDetails, de
                 onOpenDetails={onOpenDetails}
               />
               {detailsId === child.toolUseId && (
-                <ActivityDetails activity={child} onClose={onCloseDetails ?? (() => {})} />
+                <ActivityDetails activity={child} onClose={onCloseDetails ?? (() => { })} />
               )}
             </React.Fragment>
           ))}
@@ -514,7 +547,7 @@ function ActivityDetails({ activity, onClose }: { activity: ToolActivity; onClos
 
 // ===== 中间思考行 =====
 
-function IntermediateRow({ text, index, animate }: { text: string; index: number; animate: boolean }): React.ReactElement {
+export function IntermediateRow({ text, index, animate }: { text: string; index: number; animate: boolean }): React.ReactElement {
   const delay = animate && index < SIZE.staggerLimit ? `${index * 30}ms` : '0ms'
   return (
     <div
@@ -595,56 +628,56 @@ export function ToolActivityList({ activities, animate = false }: ToolActivityLi
               : undefined
         }
       >
-      {grouped.map((item, i) => {
-        if (isActivityGroup(item)) {
-          return (
-            <ActivityGroupRow
-              key={item.parent.toolUseId}
-              group={item}
-              index={i}
-              animate={animate}
-              onOpenDetails={handleOpenDetails}
-              detailsId={detailsId}
-              onCloseDetails={() => setDetailsId(null)}
-            />
-          )
-        }
-
-        const activity = item as ToolActivity
-
-        // TodoWrite / TaskCreate 特殊渲染
-        if (activity.toolName === 'TodoWrite' || activity.toolName === 'TaskCreate') {
-          const todos = parseTodoItems(activity.input)
-          if (todos && todos.length > 0) {
+        {grouped.map((item, i) => {
+          if (isActivityGroup(item)) {
             return (
-              <React.Fragment key={activity.toolUseId}>
-                <ActivityRow
-                  activity={activity}
-                  index={i}
-                  animate={animate}
-                  // 不传递 onOpenDetails，TodoWrite/TaskCreate 不支持点击展开详情
-                  // 因为它们已经有专属的 TodoList 展示
-                />
-                <TodoList items={todos} />
-              </React.Fragment>
+              <ActivityGroupRow
+                key={item.parent.toolUseId}
+                group={item}
+                index={i}
+                animate={animate}
+                onOpenDetails={handleOpenDetails}
+                detailsId={detailsId}
+                onCloseDetails={() => setDetailsId(null)}
+              />
             )
           }
-        }
 
-        return (
-          <React.Fragment key={activity.toolUseId}>
-            <ActivityRow
-              activity={activity}
-              index={i}
-              animate={animate}
-              onOpenDetails={handleOpenDetails}
-            />
-            {detailsId === activity.toolUseId && detailActivity && (
-              <ActivityDetails activity={detailActivity} onClose={() => setDetailsId(null)} />
-            )}
-          </React.Fragment>
-        )
-      })}
+          const activity = item as ToolActivity
+
+          // TodoWrite / TaskCreate 特殊渲染
+          if (activity.toolName === 'TodoWrite' || activity.toolName === 'TaskCreate') {
+            const todos = parseTodoItems(activity.input)
+            if (todos && todos.length > 0) {
+              return (
+                <React.Fragment key={activity.toolUseId}>
+                  <ActivityRow
+                    activity={activity}
+                    index={i}
+                    animate={animate}
+                  // 不传递 onOpenDetails，TodoWrite/TaskCreate 不支持点击展开详情
+                  // 因为它们已经有专属的 TodoList 展示
+                  />
+                  <TodoList items={todos} />
+                </React.Fragment>
+              )
+            }
+          }
+
+          return (
+            <React.Fragment key={activity.toolUseId}>
+              <ActivityRow
+                activity={activity}
+                index={i}
+                animate={animate}
+                onOpenDetails={handleOpenDetails}
+              />
+              {detailsId === activity.toolUseId && detailActivity && (
+                <ActivityDetails activity={detailActivity} onClose={() => setDetailsId(null)} />
+              )}
+            </React.Fragment>
+          )
+        })}
       </div>
 
       {/* 已完成消息：折叠/展开按钮 */}

@@ -77,7 +77,7 @@ type SDKMessage =
   | SDKStreamEvent
   | SDKResultMessage
   | SDKToolProgressMessage
-  | { type: string; parent_tool_use_id?: string | null; [key: string]: unknown }
+  | { type: string; parent_tool_use_id?: string | null;[key: string]: unknown }
 
 // ============================================================================
 // Claude 适配器专用查询选项
@@ -478,8 +478,8 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
     turnId: { value: string | null },
   ): void {
     const msg = message as {
-      type: 'system'; subtype?: string; status?: string
-      task_id?: string; tool_use_id?: string; description?: string; task_type?: string
+      type: 'system'; subtype?: string; status?: string; message?: string
+      task_id?: string; tool_use_id?: string; description?: string; task_type?: string; model?: string
     }
 
     if (msg.subtype === 'compact_boundary') {
@@ -495,6 +495,14 @@ export class ClaudeAgentAdapter implements AgentProviderAdapter {
         taskType: msg.task_type,
         turnId: turnId.value || undefined,
       })
+    } else if (msg.subtype === 'init') {
+      // 初始化消息 — 提取模型名
+      const label = msg.model ? `初始化中 · ${msg.model}` : '初始化中...'
+      events.push({ type: 'system_status', message: label })
+    } else if (msg.subtype === 'status') {
+      // 其他 status 消息（非 compacting）— 转发为状态提示
+      const label = msg.message || msg.status || '处理中...'
+      events.push({ type: 'system_status', message: label })
     }
   }
 

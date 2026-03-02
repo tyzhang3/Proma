@@ -199,6 +199,8 @@ export type AgentEvent =
   | { type: 'ask_user_resolved'; requestId: string }
   // 提示建议
   | { type: 'prompt_suggestion'; suggestion: string }
+  // 系统状态消息（初始化进度、MCP 加载等）
+  | { type: 'system_status'; message: string }
 
 // ===== Agent 会话管理 =====
 
