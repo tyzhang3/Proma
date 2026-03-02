@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, AGENT_SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -67,6 +67,10 @@ import type {
   SystemPrompt,
   SystemPromptCreateInput,
   SystemPromptUpdateInput,
+  AgentSystemPromptConfig,
+  AgentSystemPrompt,
+  AgentSystemPromptCreateInput,
+  AgentSystemPromptUpdateInput,
   MemoryConfig,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
@@ -405,6 +409,23 @@ export interface ElectronAPI {
 
   /** 设置默认提示词 */
   setDefaultPrompt: (id: string | null) => Promise<void>
+
+  // ===== Agent 系统提示词管理 =====
+
+  /** 获取 Agent 系统提示词配置 */
+  getAgentSystemPromptConfig: () => Promise<AgentSystemPromptConfig>
+
+  /** 创建 Agent 提示词 */
+  createAgentSystemPrompt: (input: AgentSystemPromptCreateInput) => Promise<AgentSystemPrompt>
+
+  /** 更新 Agent 提示词 */
+  updateAgentSystemPrompt: (id: string, input: AgentSystemPromptUpdateInput) => Promise<AgentSystemPrompt>
+
+  /** 删除 Agent 提示词 */
+  deleteAgentSystemPrompt: (id: string) => Promise<void>
+
+  /** 设置 Agent 默认提示词 */
+  setDefaultAgentPrompt: (id: string | null) => Promise<void>
 
   // ===== 自动更新相关（可选，仅在 updater 模块存在时可用） =====
 
@@ -880,6 +901,27 @@ const electronAPI: ElectronAPI = {
 
   setDefaultPrompt: (id: string | null) => {
     return ipcRenderer.invoke(SYSTEM_PROMPT_IPC_CHANNELS.SET_DEFAULT, id)
+  },
+
+  // Agent 系统提示词管理
+  getAgentSystemPromptConfig: () => {
+    return ipcRenderer.invoke(AGENT_SYSTEM_PROMPT_IPC_CHANNELS.GET_CONFIG)
+  },
+
+  createAgentSystemPrompt: (input: AgentSystemPromptCreateInput) => {
+    return ipcRenderer.invoke(AGENT_SYSTEM_PROMPT_IPC_CHANNELS.CREATE, input)
+  },
+
+  updateAgentSystemPrompt: (id: string, input: AgentSystemPromptUpdateInput) => {
+    return ipcRenderer.invoke(AGENT_SYSTEM_PROMPT_IPC_CHANNELS.UPDATE, id, input)
+  },
+
+  deleteAgentSystemPrompt: (id: string) => {
+    return ipcRenderer.invoke(AGENT_SYSTEM_PROMPT_IPC_CHANNELS.DELETE, id)
+  },
+
+  setDefaultAgentPrompt: (id: string | null) => {
+    return ipcRenderer.invoke(AGENT_SYSTEM_PROMPT_IPC_CHANNELS.SET_DEFAULT, id)
   },
 
   // 自动更新（updater 模块为可选，bridge 始终暴露，IPC 调用失败时由渲染进程处理）

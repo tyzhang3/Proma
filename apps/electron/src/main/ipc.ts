@@ -5,7 +5,7 @@
  */
 
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow } from 'electron'
-import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS } from '@proma/shared'
+import { IPC_CHANNELS, CHANNEL_IPC_CHANNELS, CHAT_IPC_CHANNELS, AGENT_IPC_CHANNELS, ENVIRONMENT_IPC_CHANNELS, PROXY_IPC_CHANNELS, GITHUB_RELEASE_IPC_CHANNELS, SYSTEM_PROMPT_IPC_CHANNELS, AGENT_SYSTEM_PROMPT_IPC_CHANNELS, MEMORY_IPC_CHANNELS } from '@proma/shared'
 import { USER_PROFILE_IPC_CHANNELS, SETTINGS_IPC_CHANNELS } from '../types'
 import type {
   RuntimeStatus,
@@ -56,6 +56,10 @@ import type {
   SystemPrompt,
   SystemPromptCreateInput,
   SystemPromptUpdateInput,
+  AgentSystemPromptConfig,
+  AgentSystemPrompt,
+  AgentSystemPromptCreateInput,
+  AgentSystemPromptUpdateInput,
   MemoryConfig,
 } from '@proma/shared'
 import type { UserProfile, AppSettings } from '../types'
@@ -133,6 +137,13 @@ import {
   updateAppendSetting,
   setDefaultPrompt,
 } from './lib/system-prompt-manager'
+import {
+  getAgentSystemPromptConfig,
+  createAgentSystemPrompt,
+  updateAgentSystemPrompt,
+  deleteAgentSystemPrompt,
+  setDefaultAgentPrompt,
+} from './lib/agent-system-prompt-manager'
 import {
   getLatestRelease,
   listReleases as listGitHubReleases,
@@ -1134,6 +1145,48 @@ export function registerIpcHandlers(): void {
     SYSTEM_PROMPT_IPC_CHANNELS.SET_DEFAULT,
     async (_, id: string | null): Promise<void> => {
       return setDefaultPrompt(id)
+    }
+  )
+
+  // ===== Agent 系统提示词管理 =====
+
+  // 获取 Agent 系统提示词配置
+  ipcMain.handle(
+    AGENT_SYSTEM_PROMPT_IPC_CHANNELS.GET_CONFIG,
+    async (): Promise<AgentSystemPromptConfig> => {
+      return getAgentSystemPromptConfig()
+    }
+  )
+
+  // 创建 Agent 提示词
+  ipcMain.handle(
+    AGENT_SYSTEM_PROMPT_IPC_CHANNELS.CREATE,
+    async (_, input: AgentSystemPromptCreateInput): Promise<AgentSystemPrompt> => {
+      return createAgentSystemPrompt(input)
+    }
+  )
+
+  // 更新 Agent 提示词
+  ipcMain.handle(
+    AGENT_SYSTEM_PROMPT_IPC_CHANNELS.UPDATE,
+    async (_, id: string, input: AgentSystemPromptUpdateInput): Promise<AgentSystemPrompt> => {
+      return updateAgentSystemPrompt(id, input)
+    }
+  )
+
+  // 删除 Agent 提示词
+  ipcMain.handle(
+    AGENT_SYSTEM_PROMPT_IPC_CHANNELS.DELETE,
+    async (_, id: string): Promise<void> => {
+      return deleteAgentSystemPrompt(id)
+    }
+  )
+
+  // 设置 Agent 默认提示词
+  ipcMain.handle(
+    AGENT_SYSTEM_PROMPT_IPC_CHANNELS.SET_DEFAULT,
+    async (_, id: string | null): Promise<void> => {
+      return setDefaultAgentPrompt(id)
     }
   )
 

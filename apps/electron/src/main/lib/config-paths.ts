@@ -157,6 +157,15 @@ export function getSystemPromptsPath(): string {
 }
 
 /**
+ * 获取 Agent 系统提示词配置文件路径
+ *
+ * @returns ~/.proma/agent-system-prompts.json
+ */
+export function getAgentSystemPromptsPath(): string {
+  return join(getConfigDir(), 'agent-system-prompts.json')
+}
+
+/**
  * 获取记忆配置文件路径
  *
  * @returns ~/.proma/memory.json

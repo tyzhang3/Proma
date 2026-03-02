@@ -28,6 +28,7 @@ import { appModeAtom } from '@/atoms/app-mode'
 import type { AgentSkillStorageInfo, McpServerEntry, SkillMeta, WorkspaceMcpConfig } from '@proma/shared'
 import { SettingsSection, SettingsCard, SettingsRow } from './primitives'
 import { McpServerForm } from './McpServerForm'
+import { AgentPromptSettings } from './AgentPromptSettings'
 
 /** 组件视图模式 */
 type ViewMode = 'list' | 'create' | 'edit'
@@ -97,11 +98,15 @@ export function AgentSettings(): React.ReactElement {
   // 无工作区时提示
   if (!currentWorkspace) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <FolderOpen size={48} className="text-muted-foreground/50 mb-4" />
-        <p className="text-sm text-muted-foreground">
-          请先在 Agent 模式下选择或创建一个工作区
-        </p>
+      <div className="space-y-8">
+        <AgentPromptSettings />
+
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <FolderOpen size={48} className="text-muted-foreground/50 mb-4" />
+          <p className="text-sm text-muted-foreground">
+            请先在 Agent 模式下选择或创建一个工作区，以配置 MCP 与 Skills
+          </p>
+        </div>
       </div>
     )
   }
@@ -296,6 +301,8 @@ ${skillList}
   // 列表视图
   return (
     <div className="space-y-8">
+      <AgentPromptSettings />
+
       {/* 区块一：MCP 服务器 */}
       <SettingsSection
         title="MCP 服务器"

@@ -35,6 +35,7 @@ import { getAgentWorkspacePath } from './config-paths'
 import { resolveAgentCwdByWorkspaceId } from './agent-cwd-resolver'
 import { getRuntimeStatus } from './runtime-init'
 import { buildSystemPromptAppend, buildDynamicContext } from './agent-prompt-builder'
+import { getDefaultAgentSystemPromptContent } from './agent-system-prompt-manager'
 import { permissionService } from './agent-permission-service'
 import { askUserService } from './agent-ask-user-service'
 import { getMemoryConfig } from './memory-service'
@@ -690,6 +691,17 @@ export class AgentOrchestrator {
           )
         : undefined
 
+      // 13. 构建最终 system prompt append（内置 + Agent 自定义）
+      const builtinSystemAppend = buildSystemPromptAppend({
+        workspaceName: workspace?.name,
+        workspaceSlug,
+        sessionId,
+      })
+      const userSystemPrompt = getDefaultAgentSystemPromptContent().trim()
+      const finalSystemAppend = userSystemPrompt
+        ? `${builtinSystemAppend}\n\n## Agent 用户自定义系统提示词\n\n${userSystemPrompt}`
+        : builtinSystemAppend
+
       // 13. 构建 Adapter 查询选项
       const queryOptions: ClaudeAgentQueryOptions = {
         sessionId,
@@ -708,11 +720,7 @@ export class AgentOrchestrator {
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
-          append: buildSystemPromptAppend({
-            workspaceName: workspace?.name,
-            workspaceSlug,
-            sessionId,
-          }),
+          append: finalSystemAppend,
         },
         resumeSessionId: existingSdkSessionId,
         ...(Object.keys(mcpServers).length > 0 && { mcpServers }),

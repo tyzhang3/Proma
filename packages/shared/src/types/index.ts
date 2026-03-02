@@ -35,3 +35,6 @@ export * from './github'
 
 // 系统提示词相关类型
 export * from './system-prompt'
+
+// Agent 系统提示词相关类型
+export * from './agent-system-prompt'
