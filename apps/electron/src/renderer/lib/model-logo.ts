@@ -106,9 +106,6 @@ import StepDarkLogo from '@/assets/models/step_dark.png'
 // MiniMax
 import MiniMaxLogo from '@/assets/models/minimax.png'
 
-// Proma
-import PromaLogo from '@/assets/models/proma.png'
-
 // Cohere
 import CohereLogo from '@/assets/models/cohere.png'
 import CohereDarkLogo from '@/assets/models/cohere_dark.png'
@@ -248,7 +245,6 @@ const PROVIDER_LOGO_MAP: Record<ProviderType, string> = {
  * 优先级高于 ProviderType，用于识别用户通过兼容格式接入的实际供应商。
  */
 const URL_LOGO_MAP: Array<[RegExp, string]> = [
-  [/proma\.cool/i, PromaLogo],
   [/moonshot\.cn|kimi/i, MoonshotLogo],
   [/bigmodel\.cn|zhipuai/i, ZhipuLogo],
   [/minimax/i, MiniMaxLogo],
@@ -334,4 +330,4 @@ export function getChannelLogo(baseUrl: string): string {
 }
 
 /** 默认模型图标 */
-export { DefaultLogo, PromaLogo }
+export { DefaultLogo }

@@ -6,8 +6,6 @@ Next-generation AI desktop app with integrated agents. Local-first, multi-provid
 
 ![Proma Poster](https://img.erlich.fun/personal-blog/uPic/pb.png)
 
-### Commercial Version Running in Parallel
-Proma also offers a commercial version. If you need **cloud features** | **stable and reliable API** | **cost-effective subscription plans** | **simple user experience**, you're welcome to support the commercial version of Proma: https://proma.cool/download
 
 The core vision of Proma is not to replace any particular software. Currently, only the infrastructure of Proma has been implemented. Going forward, Proma will continue to build multi-agent collaboration (personal and team), agent connections with external services, Tools and Skills consolidation, and the ability to proactively provide software and suggestions based on user understanding and memory. Proma is evolving rapidly with the help of VibeCoding tools. PRs are welcome!
 
